@@ -3,6 +3,10 @@
  * -------------------
  *
  * @author Marty Stepp
+ * @version 2019/04/23
+ * - moved some event listener code to GInteractor superclass
+ * @version 2019/02/02
+ * - destructor now stops event processing
  * @version 2018/08/23
  * - renamed to gtextarea.cpp to replace Java version
  * @version 2018/06/25
@@ -45,6 +49,7 @@ GTextArea::GTextArea(const std::string& text, QWidget* parent)
 
 GTextArea::~GTextArea() {
     // TODO: delete _iqtextedit;
+    _iqtextedit->detach();
     _iqtextedit = nullptr;
 }
 
@@ -213,17 +218,6 @@ void GTextArea::moveCursorToStart() {
     });
 }
 
-void GTextArea::removeKeyListener() {
-    removeEventListeners({"keypress",
-                          "keyrelease",
-                          "keytype"});
-}
-
-void GTextArea::removeMouseListener() {
-    removeEventListeners({"mousepress",
-                          "mouserelease"});
-}
-
 void GTextArea::removeTextChangeListener() {
     removeEventListener("textchange");
 }
@@ -294,6 +288,22 @@ void GTextArea::setHtml(const std::string& html) {
     });
 }
 
+void GTextArea::setLineWrap(bool wrap) {
+    GThread::runOnQtGuiThread([this, wrap]() {
+        _iqtextedit->setLineWrapMode(wrap ? QTextEdit::WidgetWidth : QTextEdit::NoWrap);
+    });
+}
+
+void GTextArea::setMouseListener(GEventListener func) {
+    setEventListeners({"mousepress",
+                       "mouserelease"}, func);
+}
+
+void GTextArea::setMouseListener(GEventListenerVoid func) {
+    setEventListeners({"mousepress",
+                       "mouserelease"}, func);
+}
+
 void GTextArea::setPlaceholder(const std::string& text) {
     GThread::runOnQtGuiThread([this, text]() {
         _iqtextedit->setPlaceholderText(QString::fromStdString(text));
@@ -321,40 +331,6 @@ void GTextArea::setText(const std::string& text) {
     });
 }
 
-void GTextArea::setKeyListener(GEventListener func) {
-    GThread::runOnQtGuiThread([this]() {
-        _iqtextedit->setFocusPolicy(Qt::StrongFocus);
-    });
-    setEventListeners({"keypress",
-                       "keyrelease",
-                       "keytype"}, func);
-}
-
-void GTextArea::setKeyListener(GEventListenerVoid func) {
-    GThread::runOnQtGuiThread([this]() {
-        _iqtextedit->setFocusPolicy(Qt::StrongFocus);
-    });
-    setEventListeners({"keypress",
-                       "keyrelease",
-                       "keytype"}, func);
-}
-
-void GTextArea::setMouseListener(GEventListener func) {
-    setEventListeners({"mousepress",
-                       "mouserelease"}, func);
-}
-
-void GTextArea::setMouseListener(GEventListenerVoid func) {
-    setEventListeners({"mousepress",
-                       "mouserelease"}, func);
-}
-
-void GTextArea::setLineWrap(bool wrap) {
-    GThread::runOnQtGuiThread([this, wrap]() {
-        _iqtextedit->setLineWrapMode(wrap ? QTextEdit::WidgetWidth : QTextEdit::NoWrap);
-    });
-}
-
 void GTextArea::setTextChangeListener(GEventListener func) {
     setEventListener("textchange", func);
 }
@@ -370,6 +346,7 @@ _Internal_QTextEdit::_Internal_QTextEdit(GTextArea* gtextArea, QWidget* parent)
     require::nonNull(gtextArea, "_Internal_QTextEdit::constructor");
     setObjectName(QString::fromStdString("_Internal_QTextEdit_" + std::to_string(gtextArea->getID())));
     ensureCursorVisible();
+    setFocusPolicy(Qt::StrongFocus);
     setTabChangesFocus(false);
     document()->setUndoRedoEnabled(false);
     connect(this, SIGNAL(textChanged()), this, SLOT(handleTextChange()));
@@ -377,11 +354,19 @@ _Internal_QTextEdit::_Internal_QTextEdit(GTextArea* gtextArea, QWidget* parent)
 }
 
 void _Internal_QTextEdit::contextMenuEvent(QContextMenuEvent* event) {
+    if (!_gtextarea) {
+        QTextEdit::contextMenuEvent(event);   // call super
+        return;
+    }
     if (_gtextarea->isContextMenuEnabled()) {
         event->accept();
     } else {
         event->ignore();
     }
+}
+
+void _Internal_QTextEdit::detach() {
+    _gtextarea = nullptr;
 }
 
 void _Internal_QTextEdit::handleScroll(int value) {
@@ -423,7 +408,7 @@ void _Internal_QTextEdit::keyPressEvent(QKeyEvent* event) {
 }
 
 void _Internal_QTextEdit::keyReleaseEvent(QKeyEvent* event) {
-    require::nonNull(event, "_Internal_QTextEdit::keyPressEvent", "event");
+    require::nonNull(event, "_Internal_QTextEdit::keyReleaseEvent", "event");
     if (_gtextarea && _gtextarea->isAcceptingEvent("keyrelease")) {
         event->accept();
         _gtextarea->fireGEvent(event, KEY_RELEASED, "keyrelease");
@@ -437,7 +422,7 @@ void _Internal_QTextEdit::keyReleaseEvent(QKeyEvent* event) {
 
 void _Internal_QTextEdit::mousePressEvent(QMouseEvent* event) {
     require::nonNull(event, "_Internal_QTextEdit::mousePressEvent", "event");
-    if (_gtextarea->isAcceptingEvent("mousepress")) {
+    if (_gtextarea && _gtextarea->isAcceptingEvent("mousepress")) {
         event->accept();
         _gtextarea->fireGEvent(event, MOUSE_PRESSED, "mousepress");
         if (event->isAccepted()) {

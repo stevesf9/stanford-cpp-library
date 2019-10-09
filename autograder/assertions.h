@@ -8,6 +8,8 @@
  * can show the results in the GUI for the user.
  * 
  * @author Marty Stepp
+ * @version 2018/11/14
+ * - added assertEqualsPointer
  * @version 2018/01/23
  * - fixed bugs with assertThrows* macros
  * @version 2017/12/12
@@ -26,9 +28,15 @@
 #ifndef _assertions_h
 #define _assertions_h
 
+#define INTERNAL_INCLUDE 1
 #include "gtest.h"
+#define INTERNAL_INCLUDE 1
 #include "autograder.h"
+#define INTERNAL_INCLUDE 1
 #include "diff.h"
+#define INTERNAL_INCLUDE 1
+#include "gbufferedimage.h"
+#undef INTERNAL_INCLUDE
 
 #define TEST_FAIL_PREFIX std::string("Test case failed: ")
 #define FAIL_PREFIX      std::string("Assertion failed: ")
@@ -85,6 +93,12 @@
             (msg), (a), (b), "T", ((a) == (b)))); \
     } \
     ASSERT_EQ((a), (b))
+
+#define assertEqualsPointer(msg, a, b) \
+    stanfordcpplib::autograder::Autograder::instance()->setFailDetails(stanfordcpplib::autograder::UnitTestDetails( \
+        stanfordcpplib::autograder::UnitTestType::TEST_ASSERT_EQUALS, \
+        (msg), static_cast<void*>(a), static_cast<void*>(b), "pointer", ((a) == (b)))); \
+    EXPECT_EQ((a), (b))
 
 #define assertEqualsString(msg, a, b) \
     stanfordcpplib::autograder::Autograder::instance()->setFailDetails(stanfordcpplib::autograder::UnitTestDetails( \
@@ -205,7 +219,8 @@
     stanfordcpplib::autograder::Autograder::instance()->setFailDetails(stanfordcpplib::autograder::UnitTestDetails( \
         stanfordcpplib::autograder::UnitTestType::TEST_PASS, \
         (msg), true)); \
-    GTEST_SUCCESS_((msg))
+    GTEST_SUCCESS_((std::string(msg).c_str()))
+// JDZ accept either old or new style string, convert to C-string
 
 #define assertPassQuiet() \
     stanfordcpplib::autograder::Autograder::instance()->setFailDetails(stanfordcpplib::autograder::UnitTestDetails( \
@@ -213,6 +228,7 @@
         "", true)); \
     GTEST_SUCCESS_("")
 
+// JDZ: these not quite right -- setFailDetails to passed before knows whether exception thrown or not
 #define assertThrowsAny(msg, stmt) \
     stanfordcpplib::autograder::Autograder::instance()->setFailDetails(stanfordcpplib::autograder::UnitTestDetails( \
         stanfordcpplib::autograder::UnitTestType::TEST_EXCEPTION, \
@@ -229,9 +245,27 @@
         msg, true)); \
     EXPECT_NO_THROW(stmt)
 
+// JDZ: if you have info on whether exception thrown or not, use this one
+#define assertDidThrow(msg, didThrow) \
+    stanfordcpplib::autograder::Autograder::instance()->setFailDetails(stanfordcpplib::autograder::UnitTestDetails( \
+        stanfordcpplib::autograder::UnitTestType::TEST_NOT_EXCEPTION, \
+        msg, didThrow)); \
+    EXPECT_TRUE(didThrow)
+
+void assertEqualsImage(const std::string& msg,
+                       GBufferedImage& imagefile1,
+                       GBufferedImage& imagefile2);
+
 void assertEqualsImage(const std::string& msg,
                        const std::string& imagefile1,
                        const std::string& imagefile2);
+
+void assertSimilarImage(const std::string& msg,
+                        GBufferedImage& image1,
+                        GBufferedImage& image2,
+                        int diffPixelTolerance = 0,
+                        int xmin = -1, int ymin = -1,
+                        int xmax = -1, int ymax = -1);
 
 void assertSimilarImage(const std::string& msg,
                         const std::string& imagefile1,

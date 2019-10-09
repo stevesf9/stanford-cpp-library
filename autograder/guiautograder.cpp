@@ -1,10 +1,20 @@
 /*
- * File: autogradergui.cpp
+ * File: guiautograder.cpp
  * -----------------------
  * This file contains the implementation of the AutograderUnitTestGui class.
  * See autograderunittestgui.h for declarations and documentation.
  *
  * @author Marty Stepp
+ * @version 2019/05/05
+ * - dark mode support
+ * @version 2019/04/23
+ * - reset std::cout/cerr flags on every test run
+ * @version 2019/04/22
+ * - now uses image strip file for icons
+ * @version 2019/04/20
+ * - display expected/actual values using toPrintable to show non-printable characters better
+ * @version 2018/12/01
+ * - added printf messages to indicate each test as it runs/finishes
  * @version 2018/10/07
  * - icon constants and path fixes; start message word wrap
  * @version 2018/10/06
@@ -20,28 +30,52 @@
 
 #define INTERNAL_INCLUDE 1
 #include "guiautograder.h"
+#define INTERNAL_INCLUDE 1
 #include "autogradertest.h"
+#define INTERNAL_INCLUDE 1
+#include "bitstream.h"
+#define INTERNAL_INCLUDE 1
 #include "consoletext.h"
+#define INTERNAL_INCLUDE 1
 #include "filelib.h"
+#define INTERNAL_INCLUDE 1
 #include "gconsolewindow.h"
+#define INTERNAL_INCLUDE 1
 #include "gdiffgui.h"
+#define INTERNAL_INCLUDE 1
 #include "gdiffimage.h"
+#define INTERNAL_INCLUDE 1
 #include "gfont.h"
+#define INTERNAL_INCLUDE 1
 #include "ginputpanel.h"
+#define INTERNAL_INCLUDE 1
 #include "glayout.h"
+#define INTERNAL_INCLUDE 1
 #include "goptionpane.h"
+#define INTERNAL_INCLUDE 1
 #include "gscrollpane.h"
+#define INTERNAL_INCLUDE 1
 #include "gspacer.h"
+#define INTERNAL_INCLUDE 1
 #include "gthread.h"
+#define INTERNAL_INCLUDE 1
 #include "ioutils.h"
+#define INTERNAL_INCLUDE 1
 #include "qtgui.h"
+#define INTERNAL_INCLUDE 1
 #include "regexpr.h"
+#define INTERNAL_INCLUDE 1
 #include "stringutils.h"
+#define INTERNAL_INCLUDE 1
 #include "strlib.h"
+#define INTERNAL_INCLUDE 1
 #include "stylecheck.h"
+#define INTERNAL_INCLUDE 1
 #include "testresultprinter.h"
-#include <sstream>
+#define INTERNAL_INCLUDE 1
+#include "unittestdetails.h"
 #undef INTERNAL_INCLUDE
+#include <sstream>
 
 // student's main function
 extern int main();
@@ -49,35 +83,39 @@ extern int main();
 namespace stanfordcpplib {
 namespace autograder {
 
-GuiAutograder* GuiAutograder::_instance = nullptr;
-GuiAutograder* GuiAutograder::_instanceStyleCheck = nullptr;
-const bool GuiAutograder::AUTO_EXPAND_FAILED_TESTS = false;
-const int GuiAutograder::DEFAULT_WINDOW_WIDTH = 500;
-const int GuiAutograder::DEFAULT_WINDOW_HEIGHT = 700;
-const int GuiAutograder::MAX_VALUE_DISPLAY_LENGTH = 150;
-int GuiAutograder::MAX_WINDOW_HEIGHT = -1;
-const std::string GuiAutograder::COLOR_PASS = "#006600";
-const std::string GuiAutograder::COLOR_FAIL = "#660000";
-const std::string GuiAutograder::COLOR_WARN = "#999900";
-std::string GuiAutograder::COLOR_NORMAL = "#111111";
-const std::string GuiAutograder::COLOR_ZEBRA_STRIPE_1 = "#fafafa";
-const std::string GuiAutograder::COLOR_ZEBRA_STRIPE_2 = "#ebebeb";
-const std::string GuiAutograder::ICON_FOLDER = "autograder/";
-const std::string GuiAutograder::ICON_ABOUT_FILENAME = GuiAutograder::ICON_FOLDER + "help.gif";
-const std::string GuiAutograder::ICON_AUTOGRADE_FILENAME = GuiAutograder::ICON_FOLDER + "check.gif";
-const std::string GuiAutograder::ICON_DESELECT_ALL_FILENAME = GuiAutograder::ICON_FOLDER + "checkbox-unchecked.gif";
-const std::string GuiAutograder::ICON_EXIT_FILENAME = GuiAutograder::ICON_FOLDER + "stop.gif";
-const std::string GuiAutograder::ICON_FAIL_FILENAME = GuiAutograder::ICON_FOLDER + "fail.gif";
-const std::string GuiAutograder::ICON_LATE_DAYS_FILENAME = GuiAutograder::ICON_FOLDER + "calendar.gif";
-const std::string GuiAutograder::ICON_MANUAL_FILENAME = GuiAutograder::ICON_FOLDER + "play.gif";
-const std::string GuiAutograder::ICON_MINIMIZE_FILENAME = GuiAutograder::ICON_FOLDER + "minus.gif";
-const std::string GuiAutograder::ICON_PASS_FILENAME = GuiAutograder::ICON_FOLDER + "pass.gif";
-const std::string GuiAutograder::ICON_PROGRESS_FILENAME = GuiAutograder::ICON_FOLDER + "progress.gif";
-const std::string GuiAutograder::ICON_RUNNING_FILENAME = GuiAutograder::ICON_FOLDER + "running.gif";
-const std::string GuiAutograder::ICON_SELECT_ALL_FILENAME = GuiAutograder::ICON_FOLDER + "checkbox-checked.gif";
-const std::string GuiAutograder::ICON_STYLE_CHECK_FILENAME = GuiAutograder::ICON_FOLDER + "magnifier.gif";
-const std::string GuiAutograder::ICON_UNKNOWN_FILENAME = GuiAutograder::ICON_FOLDER + "unknown.gif";
-const std::string GuiAutograder::ICON_WARNING_FILENAME = GuiAutograder::ICON_FOLDER + "warning.gif";
+/*static*/ GuiAutograder* GuiAutograder::_instance = nullptr;
+/*static*/ GuiAutograder* GuiAutograder::_instanceStyleCheck = nullptr;
+/*static*/ const bool GuiAutograder::AUTO_EXPAND_FAILED_TESTS = false;
+/*static*/ const int GuiAutograder::DEFAULT_WINDOW_WIDTH  = 500;
+/*static*/ const int GuiAutograder::DEFAULT_WINDOW_HEIGHT = 700;
+/*static*/ const int GuiAutograder::MAX_VALUE_DISPLAY_LENGTH = 150;
+/*static*/ int GuiAutograder::MAX_WINDOW_HEIGHT = -1;
+/*static*/ const std::string GuiAutograder::COLOR_PASS                     = "#006600";
+/*static*/ const std::string GuiAutograder::COLOR_PASS_DARK_MODE           = "#55ff44";
+/*static*/ const std::string GuiAutograder::COLOR_FAIL                     = "#660000";
+/*static*/ const std::string GuiAutograder::COLOR_FAIL_DARK_MODE           = "#f47862";
+/*static*/ const std::string GuiAutograder::COLOR_WARN                     = "#999900";
+/*static*/ const std::string GuiAutograder::COLOR_WARN_DARK_MODE           = "#eeee22";
+/*static*/ const std::string GuiAutograder::COLOR_ZEBRA_STRIPE_1           = "#fafafa";
+/*static*/ const std::string GuiAutograder::COLOR_ZEBRA_STRIPE_1_DARK_MODE = "#1e1e1e";
+/*static*/ const std::string GuiAutograder::COLOR_ZEBRA_STRIPE_2           = "#ebebeb";
+/*static*/ const std::string GuiAutograder::COLOR_ZEBRA_STRIPE_2_DARK_MODE = "#2d2d2d";
+/*static*/ const std::string GuiAutograder::ICON_FOLDER = "";
+/*static*/ const std::string GuiAutograder::ICON_ABOUT_FILENAME        = GuiAutograder::ICON_FOLDER + "helpbig.gif";
+/*static*/ const std::string GuiAutograder::ICON_AUTOGRADE_FILENAME    = GuiAutograder::ICON_FOLDER + "check.gif";
+/*static*/ const std::string GuiAutograder::ICON_DESELECT_ALL_FILENAME = GuiAutograder::ICON_FOLDER + "checkbox-unchecked.gif";
+/*static*/ const std::string GuiAutograder::ICON_EXIT_FILENAME         = GuiAutograder::ICON_FOLDER + "stop.gif";
+/*static*/ const std::string GuiAutograder::ICON_FAIL_FILENAME         = GuiAutograder::ICON_FOLDER + "fail.gif";
+/*static*/ const std::string GuiAutograder::ICON_LATE_DAYS_FILENAME    = GuiAutograder::ICON_FOLDER + "calendar.gif";
+/*static*/ const std::string GuiAutograder::ICON_MANUAL_FILENAME       = GuiAutograder::ICON_FOLDER + "play.gif";
+/*static*/ const std::string GuiAutograder::ICON_MINIMIZE_FILENAME     = GuiAutograder::ICON_FOLDER + "minus.gif";
+/*static*/ const std::string GuiAutograder::ICON_PASS_FILENAME         = GuiAutograder::ICON_FOLDER + "pass.gif";
+/*static*/ const std::string GuiAutograder::ICON_PROGRESS_FILENAME     = GuiAutograder::ICON_FOLDER + "progress.gif";
+/*static*/ const std::string GuiAutograder::ICON_RUNNING_FILENAME      = GuiAutograder::ICON_FOLDER + "running.gif";
+/*static*/ const std::string GuiAutograder::ICON_SELECT_ALL_FILENAME   = GuiAutograder::ICON_FOLDER + "checkbox-checked.gif";
+/*static*/ const std::string GuiAutograder::ICON_STYLE_CHECK_FILENAME  = GuiAutograder::ICON_FOLDER + "magnifier.gif";
+/*static*/ const std::string GuiAutograder::ICON_UNKNOWN_FILENAME      = GuiAutograder::ICON_FOLDER + "unknown.gif";
+/*static*/ const std::string GuiAutograder::ICON_WARNING_FILENAME      = GuiAutograder::ICON_FOLDER + "warn.gif";
 
 GuiAutograder* GuiAutograder::instance() {
     if (!_instance) {
@@ -119,6 +157,53 @@ GuiAutograder::GuiAutograder()
             MAX_WINDOW_HEIGHT = static_cast<int>(GWindow::getScreenHeight() - 80);
         }
 
+        // read and unpack autograder icon image strip
+        const std::string ICON_STRIP_FILE = "iconstrip-autograder.png";
+        const Vector<std::string> IMAGES {
+            "calendar.gif",
+            "check.gif",
+            "helpbig.gif",
+            "magnifier.gif",
+            "play.gif",
+            "pause.gif",
+            "stop.gif",
+            "textfile.gif",
+
+            "fail.gif",
+            "help.gif",
+            "pass.gif",
+            "running.gif",
+            "warn.gif",
+            "checkbox-checked.gif",
+            "checkbox-unchecked.gif",
+            "minus.gif"
+        };
+        const GDimension LARGE_SIZE(32, 32);
+        const GDimension SMALL_SIZE(16, 16);
+        Vector<GDimension> IMAGE_SIZES = {
+            LARGE_SIZE,
+            LARGE_SIZE,
+            LARGE_SIZE,
+            LARGE_SIZE,
+            LARGE_SIZE,
+            LARGE_SIZE,
+            LARGE_SIZE,
+            LARGE_SIZE,
+
+            SMALL_SIZE,
+            SMALL_SIZE,
+            SMALL_SIZE,
+            SMALL_SIZE,
+            SMALL_SIZE,
+            SMALL_SIZE,
+            SMALL_SIZE,
+            SMALL_SIZE
+        };
+        _iconStrip = GConsoleWindow::unpackImageStrip(ICON_STRIP_FILE, IMAGES, IMAGE_SIZES);
+        if (_iconStrip.isEmpty()) {
+            error("GuiAutograder::constructor: could not find autograder image strip file " + ICON_STRIP_FILE);
+        }
+
         _catchErrorsBox = new GCheckBox("&Catch exceptions in tests", /* checked */ true);
         _catchErrorsBox->setActionListener([this]() {
             setCatchExceptions(_catchErrorsBox->isChecked());
@@ -128,8 +213,7 @@ GuiAutograder::GuiAutograder()
         // _startLabel->setWidth(DEFAULT_WINDOW_WIDTH - 20);
         _startLabel->setWordWrap(true);
 
-        _southLabel = new GLabel(" ");
-        _southLabel->setIcon(ICON_PROGRESS_FILENAME);
+        _southLabel = new GLabel(" ", _iconStrip[ICON_PROGRESS_FILENAME]);
         _southLabel->setTextPosition(GInteractor::TEXT_BESIDE_ICON);
         _window->addToRegion(_southLabel, GWindow::REGION_SOUTH);
         // _southLabel->getWidget()->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
@@ -138,19 +222,19 @@ GuiAutograder::GuiAutograder()
         // container of big buttons to click to run the autograder
         _bigButtons = new GContainer();
 
-        _autogradeButton = new GButton("Automated\ntests", ICON_AUTOGRADE_FILENAME);
+        _autogradeButton = new GButton("Automated\ntests", _iconStrip[ICON_AUTOGRADE_FILENAME]);
         _autogradeButton->setActionListener([this]() {
             onClick_autograde();
         });
         _bigButtons->add(_autogradeButton);
 
-        _manualButton = new GButton("Run\nmanually", ICON_MANUAL_FILENAME);
+        _manualButton = new GButton("Run\nmanually", _iconStrip[ICON_MANUAL_FILENAME]);
         _manualButton->setActionListener([this]() {
             onClick_runManually();
         });
         _bigButtons->add(_manualButton);
 
-        _styleCheckButton = new GButton("Style\nchecker", ICON_STYLE_CHECK_FILENAME);
+        _styleCheckButton = new GButton("Style\nchecker", _iconStrip[ICON_STYLE_CHECK_FILENAME]);
         _styleCheckButton->setActionListener([this]() {
             runStyleChecker();
         });
@@ -164,20 +248,20 @@ GuiAutograder::GuiAutograder()
             _bigButtons->add(callbackButton);
         }
 
-        _lateDayButton = new GButton("Late days\ninfo", ICON_LATE_DAYS_FILENAME);
+        _lateDayButton = new GButton("Late days\ninfo", _iconStrip[ICON_LATE_DAYS_FILENAME]);
         _lateDayButton->setActionListener([this]() {
             showLateDays();
         });
         _bigButtons->add(_lateDayButton);
 
-        _aboutButton = new GButton("About\nGrader", ICON_ABOUT_FILENAME);
+        _aboutButton = new GButton("About\nGrader", _iconStrip[ICON_ABOUT_FILENAME]);
         _aboutButton->setActionListener([this]() {
             GOptionPane::showMessageDialog(_flags.aboutText, "About Autograder",
                                    GOptionPane::MessageType::MESSAGE_INFORMATION);
         });
         _bigButtons->add(_aboutButton);
 
-        _exitButton = new GButton("Exit\nGrader", ICON_EXIT_FILENAME);
+        _exitButton = new GButton("Exit\nGrader", _iconStrip[ICON_EXIT_FILENAME]);
         _exitButton->setActionListener([this]() {
             stanfordcpplib::setExitEnabled(true);   // don't block exit() call
 
@@ -226,17 +310,23 @@ GuiAutograder::~GuiAutograder() {
 void GuiAutograder::addCallbackButton(void (* func)(),
                        const std::string& text,
                        const std::string& icon) {
-    GButton* button = new GButton(text, icon);
+    GButton* button = new GButton(text);
+    if (_iconStrip.containsKey(getTail(icon))) {
+        button->setIcon(_iconStrip[getTail(icon)]);
+    } else {
+        button->setIcon(icon);
+    }
     button->setActionListener(func);
     _bigButtons->add(button);
 }
 
-void GuiAutograder::addCategory(const std::string& categoryName) {
+void GuiAutograder::addCategory(const std::string& categoryName, const std::string& categoryDescription) {
     if (_allCategories.containsKey(categoryName)) {
         return;
     }
 
     GContainer* category = new GContainer(GContainer::LAYOUT_FLOW_VERTICAL);
+    category->setName("category");
     category->setMargin(0);
     category->setPadding(0);
     category->setSpacing(0);
@@ -248,8 +338,7 @@ void GuiAutograder::addCategory(const std::string& categoryName) {
         GContainer* top = new GContainer(GContainer::LAYOUT_FLOW_HORIZONTAL);
         top->setHorizontalAlignment(ALIGN_LEFT);
 
-        GButton* selectAllButton = new GButton("All");
-        selectAllButton->setIcon(ICON_SELECT_ALL_FILENAME);
+        GButton* selectAllButton = new GButton("All", _iconStrip[ICON_SELECT_ALL_FILENAME]);
         selectAllButton->setTextPosition(GInteractor::TEXT_BESIDE_ICON);
         GFont::changeFontSize(selectAllButton, -2);
         selectAllButton->setTooltip("Double-click to select all tests from all categories.");
@@ -260,8 +349,7 @@ void GuiAutograder::addCategory(const std::string& categoryName) {
             selectAll(_center, /* selected */ true);
         });
 
-        GButton* deselectAllButton = new GButton("None");
-        deselectAllButton->setIcon(ICON_DESELECT_ALL_FILENAME);
+        GButton* deselectAllButton = new GButton("None", _iconStrip[ICON_DESELECT_ALL_FILENAME]);
         deselectAllButton->setTextPosition(GInteractor::TEXT_BESIDE_ICON);
         GFont::changeFontSize(deselectAllButton, -2);
         deselectAllButton->setTooltip("Double-click to deselect all tests from all categories.");
@@ -272,12 +360,17 @@ void GuiAutograder::addCategory(const std::string& categoryName) {
             selectAll(_center, /* selected */ false);
         });
 
-        GButton* minimizeButton = new GButton("Hide");
-        minimizeButton->setIcon(ICON_MINIMIZE_FILENAME);
+        GButton* minimizeButton = new GButton("Hide", _iconStrip[ICON_MINIMIZE_FILENAME]);
+        minimizeButton->setTextPosition(GInteractor::TEXT_BESIDE_ICON);
         GFont::changeFontSize(minimizeButton, -2);
         minimizeButton->setTooltip("Double-click to minimize all categories.");
         minimizeButton->setActionListener([this, category]() {
             minimize(category);
+        });
+        minimizeButton->setDoubleClickListener([this]() {
+            GThread::runOnQtGuiThreadAsync([this]() {
+                minimizeAll(true);
+            });
         });
 
         if (_checkboxesShown) {
@@ -293,6 +386,14 @@ void GuiAutograder::addCategory(const std::string& categoryName) {
         }
 
         category->add(top);
+
+        if (!categoryDescription.empty()) {
+            GLabel* descriptionLabel = new GLabel(categoryDescription);
+            descriptionLabel->setName("description");
+            descriptionLabel->setWordWrap(true);
+            GFont::changeFontSize(descriptionLabel, -1);
+            category->add(descriptionLabel);
+        }
     }
 
     _center->add(category);
@@ -300,7 +401,7 @@ void GuiAutograder::addCategory(const std::string& categoryName) {
 }
 
 void GuiAutograder::addTest(const std::string& testName, const std::string& categoryName) {
-    if (!_allCategories.containsKey(categoryName)) {
+    if (!containsCategory(categoryName)) {
         addCategory(categoryName);
     }
 
@@ -314,7 +415,9 @@ void GuiAutograder::addTest(const std::string& testName, const std::string& cate
     test->setMargin(0);
     test->setPadding(0);
     test->setSpacing(0);
-    std::string bgColor = _testCount % 2 == 0 ? COLOR_ZEBRA_STRIPE_1 : COLOR_ZEBRA_STRIPE_2;
+    std::string bgColor = _testCount % 2 == 0
+            ? GWindow::chooseLightDarkModeColor(COLOR_ZEBRA_STRIPE_1, COLOR_ZEBRA_STRIPE_1_DARK_MODE)
+            : GWindow::chooseLightDarkModeColor(COLOR_ZEBRA_STRIPE_2, COLOR_ZEBRA_STRIPE_2_DARK_MODE);
     test->setBackground(bgColor);
     GContainer* testWest = new GContainer;
     testWest->setBackground(bgColor);
@@ -334,7 +437,7 @@ void GuiAutograder::addTest(const std::string& testName, const std::string& cate
     std::string testFullName = testInfo->getFullName();
     _allTestInfo[testFullName] = testInfo;
 
-    GLabel* testNumberLabel = new GLabel(padLeft(integerToString(_testCount), /* digits */ 3, /* fill */ '0') + ". ");
+    GLabel* testNumberLabel = new GLabel(padLeft(std::to_string(_testCount), /* digits */ 3, /* fill */ '0') + ". ");
     // TODO: align test number right?
     testNumberLabel->setFont(GFont::deriveQFont(testNumberLabel->getFont(), QFont::Bold));
     testNumberLabel->setActionListener([testInfo]() {
@@ -362,7 +465,7 @@ void GuiAutograder::addTest(const std::string& testName, const std::string& cate
     testInfo->runtimeLabel->setTooltip("Click to see detailed results from this test.");
     testInfo->runtimeLabel->setActionListener(showDetailsFunc);
     testInfo->resultIconLabel = new GLabel;
-    testInfo->resultIconLabel->setIcon(ICON_RUNNING_FILENAME);
+    testInfo->resultIconLabel->setIcon(_iconStrip[ICON_RUNNING_FILENAME]);
     testInfo->resultIconLabel->setTooltip("Click to see detailed results from this test.");
     testInfo->resultIconLabel->setActionListener(showDetailsFunc);
 
@@ -409,15 +512,20 @@ void GuiAutograder::clearTestResults() {
         }
         UnitTestDetails deets;   // clear it out
         testInfo->details = deets;
-        testInfo->descriptionLabel->setForeground(COLOR_NORMAL);
+        testInfo->completed = false;   // JDZ: must reset! if not, default/empty result treated as valid
+        testInfo->descriptionLabel->setForeground(GWindow::getDefaultInteractorTextColorInt());
         testInfo->resultIconLabel->setText("");
-        testInfo->resultIconLabel->setIcon(ICON_RUNNING_FILENAME);
+        testInfo->resultIconLabel->setIcon(_iconStrip[ICON_RUNNING_FILENAME]);
     }
     updateSouthText();
 }
 
 void GuiAutograder::clearTests() {
     // TODO
+}
+
+bool GuiAutograder::containsCategory(const std::string& categoryName) {
+    return _allCategories.containsKey(categoryName);
 }
 
 void GuiAutograder::displayDiffs(const std::string& /*expectedOutput*/,
@@ -442,7 +550,9 @@ void GuiAutograder::failWithException(const std::string& testFullName,
         out << " with the 'Catch exceptions' box unchecked.)</small>" << std::endl;
     } else {
         out << "Stack trace:" << std::endl;
-        out << "<pre>" << stackTrace << "</pre>" << std::endl;
+        out << "<pre><font color='"
+               + GWindow::chooseLightDarkModeColor(GDiffGui::COLOR_STUDENT, GDiffGui::COLOR_STUDENT_DARK_MODE)
+               + "'>" << stackTrace << "</font></pre>" << std::endl;
     }
     // TODO: can I get this stack trace?
 
@@ -470,16 +580,17 @@ int GuiAutograder::getCheckedTestCount() const {
     return checkedCount;
 }
 
-GuiAutograder::TestResult GuiAutograder::getTestResult(const std::string& testFullName) const {
+stanfordcpplib::autograder::TestResult GuiAutograder::getTestResult(const std::string& testFullName) const {
     if (!_allTestInfo.containsKey(testFullName)) {
         return TEST_RESULT_UNKNOWN;
     }
     TestInfo* testInfo = _allTestInfo[testFullName];
-    if (testInfo->descriptionLabel->getForeground() == COLOR_FAIL) {
+    std::string fg = testInfo->descriptionLabel->getForeground();
+    if (fg == COLOR_FAIL || fg == COLOR_FAIL_DARK_MODE) {
         return TEST_RESULT_FAIL;
-    } else if (testInfo->descriptionLabel->getForeground() == COLOR_WARN) {
+    } else if (fg == COLOR_WARN || fg == COLOR_WARN_DARK_MODE) {
         return TEST_RESULT_WARN;
-    } else if (testInfo->descriptionLabel->getForeground() == COLOR_PASS) {
+    } else if (fg == COLOR_PASS || fg == COLOR_PASS_DARK_MODE) {
         return TEST_RESULT_PASS;
     } else if (testInfo->completed) {
         return testInfo->details.passed ? TEST_RESULT_PASS : TEST_RESULT_FAIL;
@@ -542,14 +653,16 @@ void GuiAutograder::minimize(GContainer* category, bool minimized) {
     }
 
     for (GInteractor* interactor : category->getInteractors()) {
-        if (interactor->getType() != "GContainer"
-                || interactor->getName() != "testPanel") {
-            continue;
+        if ((interactor->getType() == "GContainer" && interactor->getName() == "testPanel")
+                || (interactor->getType() == "GLabel" && interactor->getName() == "description")) {
+            interactor->setVisible(!minimized);
         }
+    }
+}
 
-        // TODO: set height
-
-        interactor->setVisible(!minimized);
+void GuiAutograder::minimizeAll(bool minimized) {
+    for (GContainer* category : _allCategories.values()) {
+        minimize(category, minimized);
     }
 }
 
@@ -684,16 +797,23 @@ void GuiAutograder::runStyleChecker() {
 }
 
 void GuiAutograder::runTest(stanfordcpplib::autograder::AutograderTest* test) {
+    resetStandardInputStreams();
     int timeoutMS = test->getTestTimeout();
     std::string testName = test->getName();
     std::string testFullName = test->getFullName();
-    QThread* thread = GThread::runInNewThreadAsync([this, test, testFullName]() {
+    GThread* thread = GThread::runInNewThreadAsync([this, test, testFullName]() {
         setCurrentTestCaseName(testFullName);
         if (catchExceptions()) {
             try {
+                // echo test's name to plain-text console for logging purposes
+                printf("running test \"%s\"\n", testFullName.c_str()); fflush(stdout);
+
                 // run and catch exceptions/errors thrown during test execution
                 test->TestRealBody();
+
+                printf("  complete.\n"); fflush(stdout);
             } catch (const ErrorException& ex) {
+                printf("  threw ErrorException: \"%s\"\n", ex.what()); fflush(stdout);
                 failWithException(testFullName, "An ErrorException", ex.what(), ex.getStackTrace());
             }
 
@@ -704,7 +824,7 @@ void GuiAutograder::runTest(stanfordcpplib::autograder::AutograderTest* test) {
 //            } catch (char const* str) {
 //                failWithException(testFullName, "A string exception", str);
 //            } catch (int n) {
-//                failWithException(testFullName, "An int exception", integerToString(n));
+//                failWithException(testFullName, "An int exception", std::to_string(n));
 //            } catch (long l) {
 //                failWithException(testFullName, "A long exception", longToString(l));
 //            } catch (char c) {
@@ -723,12 +843,15 @@ void GuiAutograder::runTest(stanfordcpplib::autograder::AutograderTest* test) {
 
         } else {
             test->TestRealBody();
+            printf("  complete.\n"); fflush(stdout);
         }
     }, /* threadName */ testName);
 
+    resetStandardInputStreams();
     if (GThread::wait(thread, timeoutMS)) {
         // thread is still running; timed out
-        thread->terminate();
+        printf("  timed out after %d ms.\n", timeoutMS); fflush(stdout);
+        thread->stop();
         setFailDetails(*test, autograder::UnitTestDetails(
             autograder::UnitTestType::TEST_FAIL,
             TIMEOUT_ERROR_MESSAGE));
@@ -806,24 +929,24 @@ bool GuiAutograder::setTestResult(const std::string& testFullName, TestResult re
     switch (result) {
     case TEST_RESULT_FAIL:
         iconFile = ICON_FAIL_FILENAME;
-        labelForegroundColor = COLOR_FAIL;
+        labelForegroundColor = GWindow::chooseLightDarkModeColor(COLOR_FAIL, COLOR_FAIL_DARK_MODE);
         break;
     case TEST_RESULT_PASS:
         iconFile = ICON_PASS_FILENAME;
-        labelForegroundColor = COLOR_PASS;
+        labelForegroundColor = GWindow::chooseLightDarkModeColor(COLOR_PASS, COLOR_PASS_DARK_MODE);
         _passCount++;
         break;
     case TEST_RESULT_WARN:
         iconFile = ICON_WARNING_FILENAME;
-        labelForegroundColor = COLOR_WARN;
+        labelForegroundColor = GWindow::chooseLightDarkModeColor(COLOR_WARN, COLOR_WARN_DARK_MODE);
         break;
     case TEST_RESULT_UNKNOWN:
         iconFile = ICON_UNKNOWN_FILENAME;
-        labelForegroundColor = COLOR_NORMAL;
+        labelForegroundColor = GWindow::getDefaultInteractorTextColor();
         break;
     }
 
-    testInfo->resultIconLabel->setIcon(iconFile);
+    testInfo->resultIconLabel->setIcon(_iconStrip[iconFile]);
     testInfo->descriptionLabel->setForeground(labelForegroundColor);
     updateSouthText();
     return true;
@@ -956,12 +1079,8 @@ void GuiAutograder::showTestDetails(const std::string& testFullName, bool force)
             expected = "'" + expected + "'";
             student  = "'" + student + "'";
         }
-        expected = stringReplace(expected, "\n", "\\n");
-        expected = stringReplace(expected, "\r", "\\r");
-        expected = stringReplace(expected, "\t", "\\t");
-        student  = stringReplace(student, "\n", "\\n");
-        student  = stringReplace(student, "\r", "\\r");
-        student  = stringReplace(student, "\t", "\\t");
+        expected = toPrintable(expected);
+        student  = toPrintable(student);
 
         // insert "expected"/"student" messages for some assert types for clarity
         switch (deets.testType) {
@@ -1002,15 +1121,27 @@ void GuiAutograder::showTestDetails(const std::string& testFullName, bool force)
                 htmlMessage += "<p>" + message + "</p>";
 
                 if (!expected.empty() || !student.empty()) {
+                    std::string expectedHtml = stringReplace(expectedTruncated, " ", "&nbsp;");
+                    std::string studentHtml  = stringReplace(studentTruncated, " ", "&nbsp;");
                     htmlMessage += "<ul>";
-                    htmlMessage += "<li><code><font color='" + GDiffGui::COLOR_EXPECTED + "'>expected:</font></code><code> " + expectedTruncated + "</code></li>";
-                    htmlMessage += "<li><code><font color='" + GDiffGui::COLOR_STUDENT  + "'>student :</font></code><code> " + studentTruncated  + "</code></li>";
+                    htmlMessage += "<li><code><font color='" + GWindow::chooseLightDarkModeColor(GDiffGui::COLOR_EXPECTED, GDiffGui::COLOR_EXPECTED_DARK_MODE) + "'>expected:</font></code><code>&nbsp;" + expectedHtml + "</code></li>";
+                    htmlMessage += "<li><code><font color='" + GWindow::chooseLightDarkModeColor(GDiffGui::COLOR_STUDENT, GDiffGui::COLOR_STUDENT_DARK_MODE)  + "'>student&nbsp;:</font></code><code>&nbsp;" + studentHtml + "</code></li>";
                     htmlMessage += "</ul>";
                 }
 
+                std::string resultColor = GWindow::chooseLightDarkModeColor(COLOR_PASS, COLOR_PASS_DARK_MODE);
+                std::string resultText = "PASS";
+                if (!deets.passed) {
+                    if (deets.result == TEST_RESULT_WARN) {
+                        resultColor = GWindow::chooseLightDarkModeColor(COLOR_WARN, COLOR_WARN_DARK_MODE);
+                        resultText = "WARNING";
+                    } else {
+                        resultColor = GWindow::chooseLightDarkModeColor(COLOR_FAIL, COLOR_FAIL_DARK_MODE);
+                        resultText = "FAIL";
+                    }
+                }
                 htmlMessage += std::string("<p>result: ")
-                        + "<font color='" + (deets.passed ? COLOR_PASS : COLOR_FAIL) + "'><b>"
-                        + (deets.passed ? "PASS" : "FAIL")
+                        + "<font color='" + resultColor + "'><b>" + resultText
                         + "</b></font></p>";
 
                 // if (!stack.isEmpty()) {
@@ -1070,12 +1201,12 @@ bool GuiAutograder::showTestDetailsInSameWindow(const std::string& testFullName)
 }
 
 void GuiAutograder::updateSouthText() {
-    std::string text = "passed " + integerToString(_passCount)
-            + " / " + integerToString(getCheckedTestCount()) + " tests";
+    std::string text = "passed " + std::to_string(_passCount)
+            + " / " + std::to_string(getCheckedTestCount()) + " tests";
     if (_testingIsInProgress) {
         text += " (running ...)";
         if (_southLabel->getIcon() == "") {
-            _southLabel->setIcon(ICON_PROGRESS_FILENAME);
+            _southLabel->setIcon(_iconStrip[ICON_PROGRESS_FILENAME]);
         }
     } else {
         text += " (complete)";

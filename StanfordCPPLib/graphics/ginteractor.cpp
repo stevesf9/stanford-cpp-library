@@ -3,6 +3,16 @@
  * ---------------------
  *
  * @author Marty Stepp
+ * @version 2019/04/23
+ * - added set/removeActionListener
+ * - added set/removeClickListener
+ * - added set/removeDoubleClickListener
+ * - added set/removeKeyListener
+ * - added set/removeMouseListener
+ * @version 2019/04/22
+ * - added setIcon with QIcon and QPixmap
+ * @version 2019/04/10
+ * - bug fix for setBackground on GTextArea and GBrowserPane
  * @version 2018/09/20
  * - bug fix for requestFocus threading
  * @version 2018/09/04
@@ -35,6 +45,7 @@ int GInteractor::_interactorCount = 0;
 
 GInteractor::GInteractor()
         : _actionCommand(""),
+          _actionEventType("click"),
           _icon(""),
           _name(""),
           _id(-1),
@@ -63,6 +74,10 @@ std::string GInteractor::getAccelerator() const {
 
 std::string GInteractor::getActionCommand() const {
     return _actionCommand;
+}
+
+std::string GInteractor::getActionEventType() const {
+    return _actionEventType;
 }
 
 std::string GInteractor::getBackground() const {
@@ -225,15 +240,6 @@ void GInteractor::lockForWriteConst() const {
     that->lockForWrite();
 }
 
-void GInteractor::unlock() {
-    _lock.unlock();
-}
-
-void GInteractor::unlockConst() const {
-    GInteractor* that = const_cast<GInteractor*>(this);
-    that->unlock();
-}
-
 std::string GInteractor::normalizeAccelerator(const std::string& accelerator) {
     std::string acceleratorStr = stringReplace(accelerator, "Alt-", "Alt+");
     acceleratorStr = stringReplace(acceleratorStr, "Command-", "Command+");
@@ -241,6 +247,36 @@ std::string GInteractor::normalizeAccelerator(const std::string& accelerator) {
     acceleratorStr = stringReplace(acceleratorStr, "Meta-", "Meta+");
     acceleratorStr = stringReplace(acceleratorStr, "Shift-", "Shift+");
     return acceleratorStr;
+}
+
+void GInteractor::removeActionListener() {
+    removeEventListener(getActionEventType());
+}
+
+void GInteractor::removeClickListener() {
+    removeEventListener("click");
+}
+
+void GInteractor::removeDoubleClickListener() {
+    removeEventListener("doubleclick");
+}
+
+void GInteractor::removeKeyListener() {
+    removeEventListeners({"keypress",
+                         "keyrelease",
+                         "keytype"});
+}
+
+void GInteractor::removeMouseListener() {
+    removeEventListeners({"click",
+                         "mousedrag",
+                         "mouseenter",
+                         "mouseexit",
+                         "mousemove",
+                         "mousepress",
+                         "mouserelease",
+                         "mousewheeldown",
+                         "mousewheelup"});
 }
 
 void GInteractor::requestFocus() {
@@ -257,6 +293,14 @@ void GInteractor::setAccelerator(const std::string& /* accelerator */) {
     // override in subclasses
 }
 
+void GInteractor::setActionListener(GEventListener func) {
+    setEventListener(getActionEventType(), func);
+}
+
+void GInteractor::setActionListener(GEventListenerVoid func) {
+    setEventListener(getActionEventType(), func);
+}
+
 void GInteractor::setBackground(int rgb) {
     GThread::runOnQtGuiThread([this, rgb]() {
         QPalette palette(getWidget()->palette());
@@ -268,6 +312,9 @@ void GInteractor::setBackground(int rgb) {
             palette.setColor(QPalette::Base, QColor(rgb));
             palette.setColor(QPalette::Active, QPalette::Button, QColor(rgb));
             palette.setColor(QPalette::Inactive, QPalette::Button, QColor(rgb));
+        } else if (getType() == "GTextArea"
+                   || getType() == "GBrowserPane") {
+            palette.setColor(QPalette::Base, QColor(rgb));
         }
 
         getWidget()->setAutoFillBackground(true);
@@ -289,6 +336,9 @@ void GInteractor::setBackground(const std::string& color) {
                 palette.setColor(QPalette::Base, qcolor);
                 palette.setColor(QPalette::Active, QPalette::Button, qcolor);
                 palette.setColor(QPalette::Inactive, QPalette::Button, qcolor);
+            } else if (getType() == "GTextArea"
+                       || getType() == "GBrowserPane") {
+                palette.setColor(QPalette::Base, qcolor);
             }
 
             getWidget()->setAutoFillBackground(true);
@@ -311,6 +361,14 @@ void GInteractor::setBounds(const GRectangle& size) {
     setBounds(size.getX(), size.getY(), size.getWidth(), size.getHeight());
 }
 
+void GInteractor::setClickListener(GEventListener func) {
+    setEventListener("click", func);
+}
+
+void GInteractor::setClickListener(GEventListenerVoid func) {
+    setEventListener("click", func);
+}
+
 void GInteractor::setColor(int rgb) {
     setForeground(rgb);
 }
@@ -330,6 +388,14 @@ void GInteractor::setContainer(GContainer* container) {
         });
         setVisible(false);
     }
+}
+
+void GInteractor::setDoubleClickListener(GEventListener func) {
+    setEventListener("doubleclick", func);
+}
+
+void GInteractor::setDoubleClickListener(GEventListenerVoid func) {
+    setEventListener("doubleclick", func);
 }
 
 void GInteractor::setEnabled(bool value) {
@@ -379,10 +445,30 @@ void GInteractor::setHeight(double height) {
     });
 }
 
+void GInteractor::setIcon(const QIcon& /*icon*/) {
+    // override in subclasses as appropriate
+}
+
+void GInteractor::setIcon(const QPixmap& /*icon*/) {
+    // override in subclasses as appropriate
+}
+
 void GInteractor::setIcon(const std::string& filename, bool /* retainIconSize */) {
     _icon = filename;
 
     // override in subclasses as appropriate; make sure to call super
+}
+
+void GInteractor::setKeyListener(GEventListener func) {
+    setEventListeners({"keypress",
+                       "keyrelease",
+                       "keytype"}, func);
+}
+
+void GInteractor::setKeyListener(GEventListenerVoid func) {
+    setEventListeners({"keypress",
+                       "keyrelease",
+                       "keytype"}, func);
 }
 
 void GInteractor::setLocation(double x, double y) {
@@ -405,6 +491,30 @@ void GInteractor::setMinimumSize(const GDimension& size) {
 
 void GInteractor::setMnemonic(char /* mnemonic */) {
     // empty; use an & before mnemonic character in interactor's text instead
+}
+
+void GInteractor::setMouseListener(GEventListener func) {
+    setEventListeners({"click",
+                       "mousedrag",
+                       "mouseenter",
+                       "mouseexit",
+                       "mousemove",
+                       "mousepress",
+                       "mouserelease",
+                       "mousewheeldown",
+                       "mousewheelup"}, func);
+}
+
+void GInteractor::setMouseListener(GEventListenerVoid func) {
+    setEventListeners({"click",
+                       "mousedrag",
+                       "mouseenter",
+                       "mouseexit",
+                       "mousemove",
+                       "mousepress",
+                       "mouserelease",
+                       "mousewheeldown",
+                       "mousewheelup"}, func);
 }
 
 void GInteractor::setName(const std::string& name) {
@@ -478,6 +588,15 @@ void GInteractor::setY(double y) {
     setLocation(getX(), y);
 }
 
+void GInteractor::unlock() {
+    _lock.unlock();
+}
+
+void GInteractor::unlockConst() const {
+    GInteractor* that = const_cast<GInteractor*>(this);
+    that->unlock();
+}
+
 
 _Internal_QWidget::_Internal_QWidget()
         : _minimumSize(-1, -1),
@@ -486,6 +605,10 @@ _Internal_QWidget::_Internal_QWidget()
 }
 
 _Internal_QWidget::~_Internal_QWidget() {
+    detach();
+}
+
+void _Internal_QWidget::detach() {
     // empty
 }
 

@@ -1,4 +1,7 @@
 /*
+ * @version 2019/04/24
+ * - add setFromFile
+ * - remove STL includes
  * @version 2017/10/06
  * - hid POSIX signal handler behind preprocessor macro
  * @version 2016/12/07
@@ -19,25 +22,36 @@
 #include <sstream>
 #include <string>
 
-// STL
-#include <algorithm>
-#include <deque>
-#include <list>
-#include <map>
-#include <queue>
-#include <set>
-#include <stack>
-#include <vector>
+//// STL
+//#include <algorithm>
+//#include <deque>
+//#include <list>
+//#include <map>
+//#include <queue>
+//#include <set>
+//#include <stack>
+//#include <vector>
 
 // Stanford lib stuff
+#define INTERNAL_INCLUDE 1
 #include "strlib.h"
+#define INTERNAL_INCLUDE 1
 #include "ArrayIntList.h"
+#define INTERNAL_INCLUDE 1
 #include "basicgraph.h"
+#define INTERNAL_INCLUDE 1
 #include "BinaryTree.h"
+#define INTERNAL_INCLUDE 1
 #include "HashTableMap.h"
+#define INTERNAL_INCLUDE 1
 #include "HashTableSet.h"
+#define INTERNAL_INCLUDE 1
 #include "HeapPriorityQueue.h"
+#define INTERNAL_INCLUDE 1
 #include "LinkedIntList.h"
+#define INTERNAL_INCLUDE 1
+#include "set.h"
+#undef INTERNAL_INCLUDE
 
 namespace CodeStepByStep {
 
@@ -64,6 +78,14 @@ void printlnXml(const std::string& s);
 void printXml(bool b);
 
 void printlnXml(bool b);
+
+void printXml(double d);
+
+void printlnXml(double d);
+
+void printXml(float f);
+
+void printlnXml(float f);
 
 template <typename T>
 void printXml(const T& value) {
@@ -93,9 +115,9 @@ void __printlnXml(const char* s);
 void __printlnXml(const std::string& s);
 
 // CODE FOR HANDLING SIGNALS (VARIOUS PROGRAM CRASHES)
-#define SIGSTACK ((int) 0xdeadbeef)
-#define SIGUNKNOWN ((int) 0xcafebabe)
-#define SIGTIMEOUT ((int) 0xf00df00d)
+// #define SIGSTACK ((int) 0xdeadbeef)
+// #define SIGUNKNOWN ((int) 0xcafebabe)
+// #define SIGTIMEOUT ((int) 0xf00df00d)
 
 void __codeStepByStepSignalHandler(int sig);
 #if !defined(_WIN32)
@@ -127,6 +149,10 @@ void Vector_fromString(Vector<T>& v, const std::string& str) {
     std::istringstream input(str);
     input >> v;
 }
+
+// build a set of words from a file, a la Lexicon
+// (we use this to initialize a set of words from a file in one line)
+Set<string> setFromFile(const std::string& filename, bool cache = true);
 
 // helpers for parts of main() function
 void main_begin(int argc, char** argv);

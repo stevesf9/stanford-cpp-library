@@ -4,6 +4,12 @@
  * This file implements the gobjects.h interface.
  *
  * @author Marty Stepp
+ * @version 2019/05/05
+ * - added predictable GLine point ordering
+ * @version 2019/04/23
+ * - bug fix for loading GImage from file on Windows related to istream change
+ * @version 2019/03/07
+ * - added support for loading a GImage directly from istream (htiek)
  * @version 2018/09/14
  * - added opacity support
  * - added GCanvas-to-GImage conversion support
@@ -227,6 +233,10 @@ void GObject::initializeBrushAndPen(QPainter* painter) {
     } else {
         painter->setBrush(STATIC_VARIABLE(DEFAULT_BRUSH));
     }
+
+    // anti-aliasing
+    painter->setRenderHint(QPainter::Antialiasing, GObject::isAntiAliasing());
+    painter->setRenderHint(QPainter::TextAntialiasing, GObject::isAntiAliasing());
 
     // opacity
     painter->setOpacity(_opacity);
@@ -985,25 +995,17 @@ GImage::GImage(const std::string& filename, double x, double y)
         : GObject(x, y),
           _filename(filename),
           _qimage(nullptr) {
-    if (!_filename.empty()) {
-        if (!fileExists(_filename)) {
-            error("GImage: file not found: \"" + filename + "\"");
-        }
-        // load image
-        bool hasError = false;
-        GThread::runOnQtGuiThread([this, filename, &hasError]() {
-            _qimage = new QImage;
-            if (_qimage->load(QString::fromStdString(_filename))) {
-                _width = _qimage->width();
-                _height = _qimage->height();
-            } else {
-                hasError = true;
-            }
-        });
+    if (!load(filename)) {
+        error("GImage::constructor: unable to load image from: \"" + filename + "\"");
+    }
+}
 
-        if (hasError) {
-            error("GImage: unable to load image from: \"" + filename + "\"");
-        }
+GImage::GImage(std::istream& source, double x, double y)
+        : GObject(x, y),
+          _filename("std::istream source"),
+          _qimage(nullptr) {
+    if (!loadFromStream(source)) {
+        error("GImage::constructor: unable to load image from stream input");
     }
 }
 
@@ -1026,6 +1028,44 @@ GImage::GImage(QImage* qimage) {
 GImage::~GImage() {
     // TODO: delete _image;
     _qimage = nullptr;
+}
+
+bool GImage::load(const std::string& filename) {
+    if (filename.empty() || !fileExists(filename)) {
+        return false;
+    }
+    bool hasError = false;
+    GThread::runOnQtGuiThread([this, filename, &hasError]() {
+        _qimage = new QImage;
+        if (_qimage->load(QString::fromStdString(_filename))) {
+            _width = _qimage->width();
+            _height = _qimage->height();
+        } else {
+            hasError = true;
+        }
+    });
+    return hasError;
+}
+
+bool GImage::loadFromStream(std::istream& input) {
+    // transfer bytes to a string through std::stringstream
+    std::ostringstream byteStream;
+    byteStream << input.rdbuf();
+    std::string bytes = byteStream.str();
+
+    // load image
+    bool hasError = false;
+    GThread::runOnQtGuiThread([&, this]() {
+        _qimage = new QImage;
+        if (_qimage->loadFromData(reinterpret_cast<const uchar *>(bytes.data()), bytes.size())) {
+            _width = _qimage->width();
+            _height = _qimage->height();
+        } else {
+            hasError = true;
+        }
+    });
+
+    return !hasError;
 }
 
 void GImage::draw(QPainter* painter) {
@@ -1080,6 +1120,7 @@ GLine::GLine(double x0, double y0, double x1, double y1, GObject::LineStyle line
         : GObject(x0, y0),
           _dx(x1 - x0),
           _dy(y1 - y0) {
+    setPoints(x0, y0, x1, y1);   // checks if point swap is needed
     setLineStyle(lineStyle);
 }
 
@@ -1095,10 +1136,10 @@ bool GLine::contains(double x, double y) const {
         // TODO
         // return stanfordcpplib::getPlatform()->gobject_contains(this, x, y);
     }
-    double x0 = getX();
-    double y0 = getY();
-    double x1 = x0 + _dx;
-    double y1 = y0 + _dy;
+    double x0 = getStartX();
+    double y0 = getStartY();
+    double x1 = getEndX();
+    double y1 = getEndY();
     double tSquared = STATIC_VARIABLE(LINE_TOLERANCE) * STATIC_VARIABLE(LINE_TOLERANCE);
     if (dsq(x, y, x0, y0) < tSquared) {
         return true;
@@ -1131,7 +1172,10 @@ void GLine::draw(QPainter* painter) {
         return;
     }
     initializeBrushAndPen(painter);
-    painter->drawLine((int) getX(), (int) getY(), (int) (getX() + _dx), (int) getY() + _dy);
+    painter->drawLine(static_cast<int>(getStartX()),
+                      static_cast<int>(getStartY()),
+                      static_cast<int>(getEndX()),
+                      static_cast<int>(getEndY()));
 }
 
 GRectangle GLine::getBounds() const {
@@ -1139,9 +1183,9 @@ GRectangle GLine::getBounds() const {
         // TODO
         // return stanfordcpplib::getPlatform()->gobject_getBounds(this);
     }
-    double x0 = (_dx < 0) ? getX() + _dx : getX();
-    double y0 = (_dy < 0) ? getY() + _dy : getY();
-    return GRectangle(x0, y0, getWidth(), getHeight());
+    double minX = std::min(getStartX(), getEndX());
+    double minY = std::min(getStartY(), getEndY());
+    return GRectangle(minX, minY, getWidth(), getHeight());
 }
 
 GPoint GLine::getEndPoint() const {
@@ -1180,21 +1224,42 @@ double GLine::getWidth() const {
     return std::fabs(_dx);
 }
 
-void GLine::setEndPoint(double x, double y) {
-    _dx = x - this->getX();
-    _dy = y - this->getY();
+void GLine::setEndPoint(double x1, double y1) {
+    setPoints(getStartX(), getStartY(), x1, y1);
+}
+
+void GLine::setEndPoint(const GPoint& p) {
+    setEndPoint(p.getX(), p.getY());
+}
+
+void GLine::setPoints(double x0, double y0, double x1, double y1) {
+    if (x1 < x0 || (floatingPointEqual(x1, x0) && y1 < y0)) {
+        // points are out of order; swap
+        std::swap(x0, x1);
+        std::swap(y0, y1);
+    }
+    _x = x0;
+    _y = y0;
+    _dx = x1 - x0;
+    _dy = y1 - y0;
     repaint();
 }
 
-void GLine::setStartPoint(double x, double y) {
-    _dx += getX() - x;
-    _dy += getY() - y;
-    setLocation(x, y);   // calls repaint
+void GLine::setPoints(const GPoint& p0, const GPoint& p1) {
+    setPoints(p0.getX(), p0.getY(), p1.getX(), p1.getY());
+}
+
+void GLine::setStartPoint(double x0, double y0) {
+    setPoints(x0, y0, getEndX(), getEndY());
+}
+
+void GLine::setStartPoint(const GPoint& p) {
+    setStartPoint(p.getX(), p.getY());
 }
 
 std::string GLine::toStringExtra() const {
     std::ostringstream oss;
-    oss << "x2=" << (_x + _dx) << " y2=" << (_y + _dy);
+    oss << "x2=" << getEndX() << " y2=" << getEndY();
     return oss.str();
 }
 
@@ -1551,7 +1616,7 @@ std::string GText::getText() const {
 }
 
 std::string GText::getType() const {
-    return "GString";
+    return "GText";
 }
 
 void GText::setFont(const QFont& font) {

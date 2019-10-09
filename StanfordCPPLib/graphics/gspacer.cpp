@@ -25,7 +25,8 @@ GSpacer::GSpacer(double width, double height, QWidget* parent)
 }
 
 GSpacer::~GSpacer() {
-    // TODO: delete _iqscrollarea;
+    // TODO: delete _iqspacer;
+    _iqspacer->detach();
     _iqspacer = nullptr;
 }
 

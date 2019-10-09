@@ -5,6 +5,8 @@
  * See that file for documentation of each member.
  *
  * @author Marty Stepp
+ * @version 2019/02/02
+ * - destructor now stops event processing
  * @version 2018/09/06
  * - added bounds-checking and require() calls
  * @version 2018/08/23
@@ -57,7 +59,8 @@ GTable::GTable(int rows, int columns, double width, double height, QWidget* pare
 }
 
 GTable::~GTable() {
-    // TODO: delete
+    // TODO: delete _iqtableview;
+    _iqtableview->detach();
     _iqtableview = nullptr;
 }
 
@@ -265,7 +268,7 @@ int GTable::height() const {
     return numRows();
 }
 
-bool GTable::inBounds(int row, int column) const {
+bool GTable::inTableBounds(int row, int column) const {
     return 0 <= row && row < height() && 0 <= column && column < width();
 }
 
@@ -849,7 +852,31 @@ _Internal_QTableWidget::_Internal_QTableWidget(GTable* gtable, int rows, int col
     connect(this->selectionModel(), SIGNAL(selectionChanged(const QItemSelection&, const QItemSelection&)), this, SLOT(handleSelectionChange(const QItemSelection&, const QItemSelection&)));
 }
 
+void _Internal_QTableWidget::detach() {
+    _gtable = nullptr;
+}
+
+bool _Internal_QTableWidget::edit(const QModelIndex& index, QAbstractItemView::EditTrigger trigger, QEvent* event) {
+    bool result = QAbstractItemView::edit(index, trigger, event);   // call super
+    if (!_gtable) {
+        return result;
+    }
+    if (result) {
+        bool isEdit = _lastKeyPressed == 0 || _lastKeyPressed == Qt::Key_F2 || _lastKeyPressed == Qt::Key_Tab;
+        _lastKeyPressed = 0;
+        if (isEdit) {
+            fireTableEvent(TABLE_EDIT_BEGIN, "tableeditbegin", index.row(), index.column());
+        } else {
+            fireTableEvent(TABLE_REPLACE_BEGIN, "tablereplacebegin", index.row(), index.column());
+        }
+    }
+    return result;
+}
+
 void _Internal_QTableWidget::fireTableEvent(EventType eventType, const std::string& eventName, int row, int col) {
+    if (!_gtable) {
+        return;
+    }
     GEvent tableEvent(
                 /* class  */ TABLE_EVENT,
                 /* type   */ eventType,
@@ -862,20 +889,6 @@ void _Internal_QTableWidget::fireTableEvent(EventType eventType, const std::stri
     }
     tableEvent.setActionCommand(_gtable->getActionCommand());
     _gtable->fireEvent(tableEvent);
-}
-
-bool _Internal_QTableWidget::edit(const QModelIndex& index, QAbstractItemView::EditTrigger trigger, QEvent* event) {
-    bool result = QAbstractItemView::edit(index, trigger, event);   // call super
-    if (result) {
-        bool isEdit = _lastKeyPressed == 0 || _lastKeyPressed == Qt::Key_F2 || _lastKeyPressed == Qt::Key_Tab;
-        _lastKeyPressed = 0;
-        if (isEdit) {
-            fireTableEvent(TABLE_EDIT_BEGIN, "tableeditbegin", index.row(), index.column());
-        } else {
-            fireTableEvent(TABLE_REPLACE_BEGIN, "tablereplacebegin", index.row(), index.column());
-        }
-    }
-    return result;
 }
 
 QWidget* _Internal_QTableWidget::getEditor() const {
@@ -892,21 +905,33 @@ bool _Internal_QTableWidget::isEditing() const {
 
 void _Internal_QTableWidget::closeEditor(QWidget* editor, QAbstractItemDelegate::EndEditHint hint) {
     QTableWidget::closeEditor(editor, hint);
+    if (!_gtable) {
+        return;
+    }
     // TODO: doesn't this fire even if the edit is committed?
     fireTableEvent(TABLE_EDIT_CANCEL, "tableeditcancel");
 }
 
 void _Internal_QTableWidget::handleCellChange(int row, int column) {
+    if (!_gtable) {
+        return;
+    }
     fireTableEvent(TABLE_UPDATED, "tableupdate", row, column);
 }
 
 void _Internal_QTableWidget::handleCellDoubleClick(int /*row*/, int /*column*/) {
+    if (!_gtable) {
+        return;
+    }
     _lastKeyPressed = Qt::Key_F2;   // pretend we pressed F2
     // edit/replace begin event will be fired by edit()
     // fireTableEvent(GEvent::TABLE_EDIT_BEGIN, "tableeditbegin", row, column);
 }
 
 void _Internal_QTableWidget::handleSelectionChange(const QItemSelection& selected, const QItemSelection& /*deselected*/) {
+    if (!_gtable) {
+        return;
+    }
     QItemSelectionRange range;
     if (!selected.empty()) {
         range = selected.at(0);
@@ -917,6 +942,10 @@ void _Internal_QTableWidget::handleSelectionChange(const QItemSelection& selecte
 
 void _Internal_QTableWidget::keyPressEvent(QKeyEvent* event) {
     require::nonNull(event, "_Internal_QTableWidget::keyPressEvent", "event");
+    if (!_gtable) {
+        QTableWidget::keyPressEvent(event);   // call super
+        return;
+    }
     _lastKeyPressed = event->key();
     bool wasEditing = isEditing();
     if (!wasEditing && event->key() == Qt::Key_Delete) {

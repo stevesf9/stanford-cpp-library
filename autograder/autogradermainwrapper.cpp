@@ -12,8 +12,11 @@
 
 #define INTERNAL_INCLUDE 1
 #include "autograder.h"
+#define INTERNAL_INCLUDE 1
 #include "consoleautograder.h"
+#define INTERNAL_INCLUDE 1
 #include "guiautograder.h"
+#define INTERNAL_INCLUDE 1
 #include "qtgui.h"
 #include <string>
 #undef INTERNAL_INCLUDE
@@ -40,9 +43,9 @@ int main(int argc, char** argv) {
     return qMain(argc, argv);
 }
 // keep in sync with definition in .pro file
-#ifdef REPLACE_MAIN_FUNCTION
+#ifdef SPL_REPLACE_MAIN_FUNCTION
 #define main qMain
-#endif // REPLACE_MAIN_FUNCTION
+#endif // SPL_REPLACE_MAIN_FUNCTION
 #endif // QT_NEEDS_QMAIN
 
 // initializes the Qt GUI library subsystems and Qt graphical console as needed

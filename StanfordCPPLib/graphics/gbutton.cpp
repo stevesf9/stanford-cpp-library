@@ -3,6 +3,12 @@
  * ------------------
  *
  * @author Marty Stepp
+ * @version 2019/04/23
+ * - moved some event-handling code to GInteractor superclass
+ * @version 2019/04/22
+ * - added setIcon with QIcon and QPixmap
+ * @version 2019/02/02
+ * - destructor now stops event processing
  * @version 2018/09/04
  * - added double-click event support
  * @version 2018/08/23
@@ -35,8 +41,27 @@ GButton::GButton(const std::string& text, const std::string& iconFileName, QWidg
     setVisible(false);   // all widgets are not shown until added to a window
 }
 
+GButton::GButton(const std::string& text, const QIcon& icon, QWidget* parent) {
+    GThread::runOnQtGuiThread([this, parent]() {
+        _iqpushbutton = new _Internal_QPushButton(this, getInternalParent(parent));
+    });
+    setText(text);
+    setIcon(icon);
+    setVisible(false);   // all widgets are not shown until added to a window
+}
+
+GButton::GButton(const std::string& text, const QPixmap& icon, QWidget* parent) {
+    GThread::runOnQtGuiThread([this, parent]() {
+        _iqpushbutton = new _Internal_QPushButton(this, getInternalParent(parent));
+    });
+    setText(text);
+    setIcon(icon);
+    setVisible(false);   // all widgets are not shown until added to a window
+}
+
 GButton::~GButton() {
-    // TODO: delete _button;
+    // TODO: delete _iqpushbutton;
+    _iqpushbutton->detach();
     _iqpushbutton = nullptr;
 }
 
@@ -80,14 +105,6 @@ QWidget* GButton::getWidget() const {
     return static_cast<QWidget*>(_iqpushbutton);
 }
 
-void GButton::removeActionListener() {
-    removeEventListener("click");
-}
-
-void GButton::removeDoubleClickListener() {
-    removeEventListener("doubleclick");
-}
-
 void GButton::setAccelerator(const std::string& accelerator) {
     GThread::runOnQtGuiThread([this, accelerator]() {
         QKeySequence keySeq(QString::fromStdString(normalizeAccelerator(accelerator)));
@@ -95,20 +112,28 @@ void GButton::setAccelerator(const std::string& accelerator) {
     });
 }
 
-void GButton::setActionListener(GEventListener func) {
-    setEventListener("click", func);
+void GButton::setIcon(const QIcon& icon) {
+    GInteractor::setIcon(icon);
+    GThread::runOnQtGuiThread([this, &icon]() {
+        _iqpushbutton->setIcon(icon);
+        _iqpushbutton->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+        if (!icon.availableSizes().empty()) {
+            _iqpushbutton->setIconSize(icon.availableSizes()[0]);
+        }
+        _iqpushbutton->updateGeometry();
+        _iqpushbutton->update();
+    });
 }
 
-void GButton::setActionListener(GEventListenerVoid func) {
-    setEventListener("click", func);
-}
-
-void GButton::setDoubleClickListener(GEventListener func) {
-    setEventListener("doubleclick", func);
-}
-
-void GButton::setDoubleClickListener(GEventListenerVoid func) {
-    setEventListener("doubleclick", func);
+void GButton::setIcon(const QPixmap& icon) {
+    GInteractor::setIcon(icon);
+    GThread::runOnQtGuiThread([this, &icon]() {
+        _iqpushbutton->setIcon(icon);
+        _iqpushbutton->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+        _iqpushbutton->setIconSize(icon.size());
+        _iqpushbutton->updateGeometry();
+        _iqpushbutton->update();
+    });
 }
 
 void GButton::setIcon(const std::string& filename, bool retainIconSize) {
@@ -166,8 +191,14 @@ _Internal_QPushButton::_Internal_QPushButton(GButton* button, QWidget* parent)
     connect(this, SIGNAL(clicked()), this, SLOT(handleClick()));
 }
 
+void _Internal_QPushButton::detach() {
+    _gbutton = nullptr;
+}
+
 void _Internal_QPushButton::handleClick() {
-    if (!_gbutton->isAcceptingEvent("click")) return;
+    if (!_gbutton || !_gbutton->isAcceptingEvent("click")) {
+        return;
+    }
     GEvent actionEvent(
                 /* class  */ ACTION_EVENT,
                 /* type   */ ACTION_PERFORMED,
@@ -180,8 +211,10 @@ void _Internal_QPushButton::handleClick() {
 void _Internal_QPushButton::mouseDoubleClickEvent(QMouseEvent* event) {
     require::nonNull(event, "_Internal_QPushButton::mouseDoubleClickEvent", "event");
     QWidget::mouseDoubleClickEvent(event);   // call super
+    if (!_gbutton || !_gbutton->isAcceptingEvent("doubleclick")) {
+        return;
+    }
     emit doubleClicked();
-    if (!_gbutton->isAcceptingEvent("doubleclick")) return;
     GEvent mouseEvent(
                 /* class  */ MOUSE_EVENT,
                 /* type   */ MOUSE_DOUBLE_CLICKED,

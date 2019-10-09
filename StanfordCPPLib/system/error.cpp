@@ -31,10 +31,6 @@ ErrorException::ErrorException(std::string msg)
 #endif // SPL_CONSOLE_PRINT_EXCEPTIONS
 }
 
-ErrorException::~ErrorException() throw () {
-    /* Empty */
-}
-
 void ErrorException::dump() const {
     dump(std::cerr);
 }
@@ -45,9 +41,14 @@ void ErrorException::dump(std::ostream& out) const {
     out << "*** STANFORD C++ LIBRARY" << std::endl;
     out << "*** An ErrorException occurred during program execution:" << std::endl;
     if (!_msg.empty()) {
-        out << "*** " << _msg << std::endl;
+        out << ("*** " + _msg) << std::endl;
     }
+    out << "***" << std::endl;
     out << insertStarsBeforeEachLine(getStackTrace()) << std::endl;
+    // out << "***" << std::endl;
+    // out << "*** To learn more about the crash, we strongly" << std::endl;
+    // out << "*** suggest running your program under the debugger." << std::endl;
+    // out << "***" << std::endl;
     out.flush();
 }
 
@@ -89,7 +90,7 @@ void ErrorException::setStackTrace(const std::string& stackTrace) {
     _stackTrace = stackTrace;
 }
 
-const char* ErrorException::what() const throw () {
+const char* ErrorException::what() const noexcept {
     // stepp : The original "Error: " prefix is commented out here,
     // because in many error cases, the attempt to do the string concatenation
     // ends up garbling the string and leading to garbage exception text

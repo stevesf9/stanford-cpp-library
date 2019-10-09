@@ -15,8 +15,9 @@
 TEST_CATEGORY(StringTests, "string tests");
 
 TIMED_TEST(StringTests, diffOutputFailTest, TEST_TIMEOUT_DEFAULT) {
-    std::string exp = "Hi\nyo\nbye\nok\nthe end";
-    std::string stu = "Hi\nOOPS\nbye\nDOH\nthe end";
+    std::cout << "hi\thow\tare\tyou?" << std::endl;
+    std::string exp = "Hi\nyo\nbye\nhow are you\nok\nthe end";
+    std::string stu = std::string("Hi\nOOPS\nbye\nhow\t are") + '\0' + std::string(" you\\\nDOH\nthe end");
     assertDiff("program output", exp, stu);
 }
 
@@ -24,6 +25,16 @@ TIMED_TEST(StringTests, stringToIntegerTest, TEST_TIMEOUT_DEFAULT) {
     assertEqualsInt("base-10", 234, stringToInteger("234"));
     assertEqualsInt("base-8", 156, stringToInteger("234", /* radix */ 8));
     assertEqualsInt("base-16", 564, stringToInteger("234", /* radix */ 16));
+}
+
+TIMED_TEST(StringTests, stringWithWeirdCharsTest, TEST_TIMEOUT_DEFAULT) {
+    std::string s1 = "hello  there";
+    std::string s2 = "hello\t";
+    s2 += '\0';
+    s2 += " there";
+    s2 += '\377';    // octal for 255
+    s2 += "\r\n";
+    assertEqualsString("string w/ weird chars", s1, s2);
 }
 
 TIMED_TEST(StringTests, stringToIntegerInvalidRadixTest, TEST_TIMEOUT_DEFAULT) {

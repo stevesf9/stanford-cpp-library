@@ -3,6 +3,12 @@
  * --------------------
  *
  * @author Marty Stepp
+ * @version 2019/04/23
+ * - added key events
+ * @version 2019/02/02
+ * - destructor now stops event processing
+ * @version 2019/02/01
+ * - emit CHANGE_EVENT on key presses when text changes
  * @version 2018/08/23
  * - renamed to gtextfield.cpp to replace Java version
  * @version 2018/06/29
@@ -82,9 +88,22 @@ GTextField::GTextField(double value, double min, double max, double step, QWidge
 
 GTextField::~GTextField() {
     // TODO: delete _iqlineedit;
-    _iqlineedit = nullptr;
-    _iqspinbox = nullptr;
-    _iqdoublespinbox = nullptr;
+    if (_iqlineedit) {
+        _iqlineedit->detach();
+        _iqlineedit = nullptr;
+    }
+    if (_iqspinbox) {
+        _iqspinbox->detach();
+        _iqspinbox = nullptr;
+    }
+    if (_iqdoublespinbox) {
+        _iqdoublespinbox->detach();
+        _iqdoublespinbox = nullptr;
+    }
+}
+
+std::string GTextField::getActionEventType() const {
+    return "change";
 }
 
 int GTextField::getCharsWide() const {
@@ -212,20 +231,8 @@ bool GTextField::isEditable() const {
     }
 }
 
-void GTextField::removeActionListener() {
-    removeEventListener("action");
-}
-
 void GTextField::removeTextChangeListener() {
     removeEventListener("textchange");
-}
-
-void GTextField::setActionListener(GEventListener func) {
-    setEventListener("action", func);
-}
-
-void GTextField::setActionListener(GEventListenerVoid func) {
-    setEventListener("action", func);
 }
 
 void GTextField::setAutocompleteList(std::initializer_list<std::string> strings) {
@@ -347,7 +354,7 @@ void GTextField::setValue(char value) {
 }
 
 void GTextField::setValue(double value) {
-    setText(std::to_string(value));
+    setText(realToString(value));
 }
 
 void GTextField::setValue(int value) {
@@ -391,7 +398,14 @@ _Internal_QLineEdit::_Internal_QLineEdit(GTextField* gtextField, QWidget* parent
     connect(this, SIGNAL(textChanged(QString)), this, SLOT(handleTextChange(const QString&)));
 }
 
+void _Internal_QLineEdit::detach() {
+    _gtextfield = nullptr;
+}
+
 void _Internal_QLineEdit::handleTextChange(const QString&) {
+    if (!_gtextfield) {
+        return;
+    }
     GEvent textChangeEvent(
                 /* class  */ KEY_EVENT,
                 /* type   */ KEY_TYPED,
@@ -399,20 +413,52 @@ void _Internal_QLineEdit::handleTextChange(const QString&) {
                 /* source */ _gtextfield);
     textChangeEvent.setActionCommand(_gtextfield->getActionCommand());
     _gtextfield->fireEvent(textChangeEvent);
+
+    // BUGFIX: for backward compatibility, also fire a CHANGE_EVENT
+    // (emits only to the old-style waitForEvent function)
+    GEvent changeEvent(
+                /* class  */ CHANGE_EVENT,
+                /* type   */ STATE_CHANGED,
+                /* name   */ "statechange",
+                /* source */ _gtextfield);
+    changeEvent.setActionCommand(_gtextfield->getActionCommand());
+    _gtextfield->fireEvent(changeEvent);
 }
 
 void _Internal_QLineEdit::keyPressEvent(QKeyEvent* event) {
     require::nonNull(event, "_Internal_QLineEdit::keyPressEvent", "event");
-    QLineEdit::keyPressEvent(event);   // call super
-    if (!_gtextfield->isAcceptingEvent("action")) return;
-    if (event->key() == Qt::Key_Enter || event->key() == Qt::Key_Return) {
-        GEvent actionEvent(
-                    /* class  */ ACTION_EVENT,
-                    /* type   */ ACTION_PERFORMED,
-                    /* name   */ "action",
-                    /* source */ _gtextfield);
-        actionEvent.setActionCommand(_gtextfield->getActionCommand());
-        _gtextfield->fireEvent(actionEvent);
+    if (_gtextfield && _gtextfield->isAcceptingEvent("action")) {
+        QLineEdit::keyPressEvent(event);   // call super
+        if (event->key() == Qt::Key_Enter || event->key() == Qt::Key_Return) {
+            GEvent actionEvent(
+                        /* class  */ ACTION_EVENT,
+                        /* type   */ ACTION_PERFORMED,
+                        /* name   */ "action",
+                        /* source */ _gtextfield);
+            actionEvent.setActionCommand(_gtextfield->getActionCommand());
+            _gtextfield->fireEvent(actionEvent);
+        }
+    } else if (_gtextfield && _gtextfield->isAcceptingEvent("keypress")) {
+        event->accept();
+        _gtextfield->fireGEvent(event, KEY_PRESSED, "keypress");
+        if (event->isAccepted()) {
+            QLineEdit::keyPressEvent(event);   // call super
+        }
+    } else {
+        QLineEdit::keyPressEvent(event);   // call super
+    }
+}
+
+void _Internal_QLineEdit::keyReleaseEvent(QKeyEvent* event) {
+    require::nonNull(event, "_Internal_QLineEdit::keyReleaseEvent", "event");
+    if (_gtextfield && _gtextfield->isAcceptingEvent("keyrelease")) {
+        event->accept();
+        _gtextfield->fireGEvent(event, KEY_RELEASED, "keyrelease");
+        if (event->isAccepted()) {
+            QLineEdit::keyReleaseEvent(event);   // call super
+        }
+    } else {
+        QLineEdit::keyReleaseEvent(event);   // call super
     }
 }
 
@@ -433,7 +479,14 @@ _Internal_QSpinBox::_Internal_QSpinBox(GTextField* gtextField, int min, int max,
     setSingleStep(step);
 }
 
+void _Internal_QSpinBox::detach() {
+    _gtextfield = nullptr;
+}
+
 void _Internal_QSpinBox::handleTextChange(const QString&) {
+    if (!_gtextfield) {
+        return;
+    }
     GEvent textChangeEvent(
                 /* class  */ KEY_EVENT,
                 /* type   */ KEY_TYPED,
@@ -441,6 +494,43 @@ void _Internal_QSpinBox::handleTextChange(const QString&) {
                 /* source */ _gtextfield);
     textChangeEvent.setActionCommand(_gtextfield->getActionCommand());
     _gtextfield->fireEvent(textChangeEvent);
+}
+
+void _Internal_QSpinBox::keyPressEvent(QKeyEvent* event) {
+    require::nonNull(event, "_Internal_QSpinBox::keyPressEvent", "event");
+    if (_gtextfield && _gtextfield->isAcceptingEvent("action")) {
+        QSpinBox::keyPressEvent(event);   // call super
+        if (event->key() == Qt::Key_Enter || event->key() == Qt::Key_Return) {
+            GEvent actionEvent(
+                        /* class  */ ACTION_EVENT,
+                        /* type   */ ACTION_PERFORMED,
+                        /* name   */ "action",
+                        /* source */ _gtextfield);
+            actionEvent.setActionCommand(_gtextfield->getActionCommand());
+            _gtextfield->fireEvent(actionEvent);
+        }
+    } else if (_gtextfield && _gtextfield->isAcceptingEvent("keypress")) {
+        event->accept();
+        _gtextfield->fireGEvent(event, KEY_PRESSED, "keypress");
+        if (event->isAccepted()) {
+            QSpinBox::keyPressEvent(event);   // call super
+        }
+    } else {
+        QSpinBox::keyPressEvent(event);   // call super
+    }
+}
+
+void _Internal_QSpinBox::keyReleaseEvent(QKeyEvent* event) {
+    require::nonNull(event, "_Internal_QSpinBox::keyReleaseEvent", "event");
+    if (_gtextfield && _gtextfield->isAcceptingEvent("keyrelease")) {
+        event->accept();
+        _gtextfield->fireGEvent(event, KEY_RELEASED, "keyrelease");
+        if (event->isAccepted()) {
+            QSpinBox::keyReleaseEvent(event);   // call super
+        }
+    } else {
+        QSpinBox::keyReleaseEvent(event);   // call super
+    }
 }
 
 QLineEdit* _Internal_QSpinBox::lineEdit() const {
@@ -464,7 +554,14 @@ _Internal_QDoubleSpinBox::_Internal_QDoubleSpinBox(GTextField* gtextField, doubl
     setSingleStep(step);
 }
 
+void _Internal_QDoubleSpinBox::detach() {
+    _gtextfield = nullptr;
+}
+
 void _Internal_QDoubleSpinBox::handleTextChange(const QString&) {
+    if (!_gtextfield) {
+        return;
+    }
     GEvent textChangeEvent(
                 /* class  */ KEY_EVENT,
                 /* type   */ KEY_TYPED,
@@ -472,6 +569,43 @@ void _Internal_QDoubleSpinBox::handleTextChange(const QString&) {
                 /* source */ _gtextfield);
     textChangeEvent.setActionCommand(_gtextfield->getActionCommand());
     _gtextfield->fireEvent(textChangeEvent);
+}
+
+void _Internal_QDoubleSpinBox::keyPressEvent(QKeyEvent* event) {
+    require::nonNull(event, "_Internal_QDoubleSpinBox::keyPressEvent", "event");
+    if (_gtextfield && _gtextfield->isAcceptingEvent("action")) {
+        QDoubleSpinBox::keyPressEvent(event);   // call super
+        if (event->key() == Qt::Key_Enter || event->key() == Qt::Key_Return) {
+            GEvent actionEvent(
+                        /* class  */ ACTION_EVENT,
+                        /* type   */ ACTION_PERFORMED,
+                        /* name   */ "action",
+                        /* source */ _gtextfield);
+            actionEvent.setActionCommand(_gtextfield->getActionCommand());
+            _gtextfield->fireEvent(actionEvent);
+        }
+    } else if (_gtextfield && _gtextfield->isAcceptingEvent("keypress")) {
+        event->accept();
+        _gtextfield->fireGEvent(event, KEY_PRESSED, "keypress");
+        if (event->isAccepted()) {
+            QDoubleSpinBox::keyPressEvent(event);   // call super
+        }
+    } else {
+        QDoubleSpinBox::keyPressEvent(event);   // call super
+    }
+}
+
+void _Internal_QDoubleSpinBox::keyReleaseEvent(QKeyEvent* event) {
+    require::nonNull(event, "_Internal_QDoubleSpinBox::keyReleaseEvent", "event");
+    if (_gtextfield && _gtextfield->isAcceptingEvent("keyrelease")) {
+        event->accept();
+        _gtextfield->fireGEvent(event, KEY_RELEASED, "keyrelease");
+        if (event->isAccepted()) {
+            QDoubleSpinBox::keyReleaseEvent(event);   // call super
+        }
+    } else {
+        QDoubleSpinBox::keyReleaseEvent(event);   // call super
+    }
 }
 
 QLineEdit* _Internal_QDoubleSpinBox::lineEdit() const {

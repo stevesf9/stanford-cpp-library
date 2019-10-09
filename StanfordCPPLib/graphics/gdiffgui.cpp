@@ -3,6 +3,8 @@
  * ------------------
  * 
  * @author Marty Stepp
+ * @version 2019/04/20
+ * - display expected/actual values using toPrintable to show non-printable characters better
  * @version 2018/10/06
  * - allow passing diff flags
  * @version 2018/09/27
@@ -19,14 +21,19 @@
 #include <QScrollBar>
 #include <string>
 #define INTERNAL_INCLUDE 1
+#include "bitstream.h"
+#define INTERNAL_INCLUDE 1
 #include "consoletext.h"
 #define INTERNAL_INCLUDE 1
 #include "gthread.h"
 #undef INTERNAL_INCLUDE
 
 /*static*/ const std::string GDiffGui::COLOR_EXPECTED = "#009900";
+/*static*/ const std::string GDiffGui::COLOR_EXPECTED_DARK_MODE = "#55ff44";
 /*static*/ const std::string GDiffGui::COLOR_LINE_NUMBERS = "#888888";
+/*static*/ const std::string GDiffGui::COLOR_LINE_NUMBERS_DARK_MODE = "#aaaaaa";
 /*static*/ const std::string GDiffGui::COLOR_STUDENT  = "#bb0000";
+/*static*/ const std::string GDiffGui::COLOR_STUDENT_DARK_MODE = "#f47862";
 /*static*/ const bool GDiffGui::LINE_NUMBERS = true;
 
 void GDiffGui::showDialog(const std::string& name1,
@@ -56,6 +63,7 @@ GDiffGui::GDiffGui(const std::string& name1,
         _window->setCloseOperation(GWindow::CLOSE_HIDE);
 
         // function to close the window when Escape is pressed
+        // (similar to code in gdiffimage.cpp)
         auto windowCloseLambda = [this](GEvent event) {
             if (event.getType() == KEY_PRESSED && event.getKeyChar() == GEvent::ESCAPE_KEY) {
                 _window->close();
@@ -104,7 +112,7 @@ GDiffGui::GDiffGui(const std::string& name1,
         _vsplitter->setSizes(QList<int>({INT_MAX, INT_MAX}));   // evenly size the two halves
         _vsplitterInteractor = new GGenericInteractor<QSplitter>(_vsplitter);
 
-        _window->addToRegion(_vsplitterInteractor, "Center");
+        _window->addToRegion(_vsplitterInteractor, GWindow::REGION_CENTER);
         _window->setKeyListener(windowCloseLambda);
         _window->center();
         _window->show();
@@ -129,12 +137,15 @@ void GDiffGui::setupDiffText(const std::string& diffs) {
     for (std::string line : lines) {
         std::string color;
         if (startsWith(line, "EXPECTED <")) {
-            color = COLOR_EXPECTED;
+            color = GWindow::chooseLightDarkModeColor(COLOR_EXPECTED, COLOR_EXPECTED_DARK_MODE);
         } else if (startsWith(line, "STUDENT  >")) {
-            color = COLOR_STUDENT;
+            color = GWindow::chooseLightDarkModeColor(COLOR_STUDENT, COLOR_STUDENT_DARK_MODE);
         } else {
             color = COLOR_NORMAL;
         }
+
+        // BUGFIX: display special characters with extra printable character info
+        line = toPrintable(line);
 
         _textAreaBottom->appendFormattedText(line + "\n", color);
     }
@@ -156,8 +167,8 @@ void GDiffGui::setupLeftRightText(GTextArea* textArea, const std::string& text) 
         int digits = static_cast<int>(std::to_string(lines.size()).length());
         std::string lineNumberString =
                 padLeft(i == 0 ? std::string("") : std::to_string(i), digits) + "  ";
-        textArea->appendFormattedText(lineNumberString, COLOR_LINE_NUMBERS);
-        textArea->appendFormattedText(line + "\n", COLOR_NORMAL);
+        textArea->appendFormattedText(lineNumberString, GWindow::chooseLightDarkModeColor(COLOR_LINE_NUMBERS, COLOR_LINE_NUMBERS_DARK_MODE));
+        textArea->appendFormattedText(toPrintable(line) + "\n", COLOR_NORMAL);
     }
 }
 

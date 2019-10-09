@@ -3,6 +3,11 @@
  * --------------------
  *
  * @author Marty Stepp
+ * @version 2019/02/02
+ * - destructor now stops event processing
+ * @version 2018/11/27
+ * - added code to set a widget visible after adding/inserting it to flow container
+ *   (needed to see widgets added to container after window is showing on screen)
  * @version 2018/09/19
  * - added contains, regionContains methods
  * - added argument checking with require.h
@@ -57,6 +62,7 @@ GContainer::GContainer(Layout /*layout*/, int rows, int cols, QWidget* parent)
 
 GContainer::~GContainer() {
     // TODO: delete _iqcontainer;
+    _iqcontainer->detach();
     _iqcontainer = nullptr;
 }
 
@@ -618,6 +624,8 @@ void _Internal_QContainer::add(QWidget* widget) {
             int col = _cols <= 0 ? 0 : _currentIndex % _cols;
             QGridLayout* gridLayout = (QGridLayout*) getQLayout();
             gridLayout->addWidget(widget, row, col);
+            widget->setVisible(true);
+            GLayout::forceUpdate(this);
             break;
         }
         case GContainer::LAYOUT_FLOW_HORIZONTAL:
@@ -625,6 +633,8 @@ void _Internal_QContainer::add(QWidget* widget) {
             // add to end of the list of widgets in this region
             QBoxLayout* boxLayout = (QBoxLayout*) getQLayout();
             boxLayout->insertWidget(/* index */ boxLayout->count() - 1, widget);
+            widget->setVisible(true);
+            GLayout::forceUpdate(this);
             break;
         }
         default: {
@@ -716,6 +726,11 @@ bool _Internal_QContainer::contains(QWidget* widget) const {
     }
 }
 
+void _Internal_QContainer::detach() {
+    // TODO: nullify/delete regions
+    _gcontainer = nullptr;
+}
+
 void _Internal_QContainer::fixAlignment(QWidget* widget, GContainer::Region region) {
     // needs to be run on GUI thread
     if (_layoutType == GContainer::LAYOUT_BORDER) {
@@ -804,6 +819,8 @@ void _Internal_QContainer::insert(int i, QWidget* widget) {
             int col = _cols <= 0 ? 0 : i % _cols;
             QGridLayout* gridLayout = (QGridLayout*) getQLayout();
             gridLayout->addWidget(widget, row, col);
+            widget->setVisible(true);
+            GLayout::forceUpdate(this);
             break;
         }
         case GContainer::LAYOUT_FLOW_HORIZONTAL:
@@ -812,6 +829,8 @@ void _Internal_QContainer::insert(int i, QWidget* widget) {
             // index is off by 1 because of 'stretch' widgets at start/end
             QBoxLayout* boxLayout = (QBoxLayout*) getQLayout();
             boxLayout->insertWidget(/* index */ i - 1, widget);
+            widget->setVisible(true);
+            GLayout::forceUpdate(this);
             break;
         }
     }

@@ -3,6 +3,8 @@
  * -----------------
  *
  * @author Marty Stepp
+ * @version 2019/04/23
+ * - moved some event listener code to GInteractor superclass
  * @version 2018/09/10
  * - added doc comments for new documentation generation
  * @version 2018/08/23
@@ -189,19 +191,7 @@ public:
     virtual void moveCursorToStart();
 
     /**
-     * Removes the key listener from this text field so that it will no longer
-     * call it when the user types keys.
-     */
-    virtual void removeKeyListener();
-
-    /**
-     * Removes the mouse listener from this text field so that it will no longer
-     * call it when the user moves/clicks the mouse.
-     */
-    virtual void removeMouseListener();
-
-    /**
-     * Removes the text change listener from this text field so that it will no longer
+     * Removes the text change listener from this text area so that it will no longer
      * call it when the user modifies the text.
      */
     virtual void removeTextChangeListener();
@@ -266,32 +256,24 @@ public:
     virtual void setHtml(const std::string& html);
 
     /**
-     * Sets a key listener on this text field so that it will be called
-     * when the user presses any key.
-     * Any existing key listener will be replaced.
+     * Sets whether the text area wraps its text when a line becomes too long.
+     * Default true.
      */
-    virtual void setKeyListener(GEventListener func);
+    virtual void setLineWrap(bool wrap);
 
     /**
-     * Sets a key listener on this text field so that it will be called
-     * when the user presses any key.
-     * Any existing key listener will be replaced.
-     */
-    virtual void setKeyListener(GEventListenerVoid func);
-
-    /**
-     * Sets a mouse listener on this text field so that it will be called
+     * Sets a mouse listener on this text area so that it will be called
      * when the user moves or clicks the mouse.
      * Any existing mouse listener will be replaced.
      */
-    virtual void setMouseListener(GEventListener func);
+    virtual void setMouseListener(GEventListener func) Q_DECL_OVERRIDE;
 
     /**
-     * Sets a mouse listener on this text field so that it will be called
+     * Sets a mouse listener on this text area so that it will be called
      * when the user moves or clicks the mouse.
      * Any existing mouse listener will be replaced.
      */
-    virtual void setMouseListener(GEventListenerVoid func);
+    virtual void setMouseListener(GEventListenerVoid func) Q_DECL_OVERRIDE;
 
     /**
      * Sets the text area's placeholder text, which is usually displayed
@@ -322,13 +304,7 @@ public:
     virtual void setText(const std::string& text);
 
     /**
-     * Sets whether the text area wraps its text when a line becomes too long.
-     * Default true.
-     */
-    virtual void setLineWrap(bool wrap);
-
-    /**
-     * Sets a text change listener on this text field so that it will be called
+     * Sets a text change listener on this text area so that it will be called
      * when the user modifies the current text.
      * Any existing text change listener will be replaced.
      *
@@ -344,7 +320,7 @@ public:
     virtual void setTextChangeListener(GEventListener func);
 
     /**
-     * Sets a text change listener on this text field so that it will be called
+     * Sets a text change listener on this text area so that it will be called
      * when the user modifies the current text.
      * Any existing text change listener will be replaced.
      *
@@ -381,6 +357,7 @@ class _Internal_QTextEdit : public QTextEdit, public _Internal_QWidget {
 public:
     _Internal_QTextEdit(GTextArea* gtextArea, QWidget* parent = nullptr);
     virtual void contextMenuEvent(QContextMenuEvent* event) Q_DECL_OVERRIDE;
+    virtual void detach() Q_DECL_OVERRIDE;
     virtual void keyPressEvent(QKeyEvent* event) Q_DECL_OVERRIDE;
     virtual void keyReleaseEvent(QKeyEvent* event) Q_DECL_OVERRIDE;
     virtual void mousePressEvent(QMouseEvent* event) Q_DECL_OVERRIDE;
@@ -393,6 +370,8 @@ public slots:
 
 private:
     GTextArea* _gtextarea;
+
+    friend class GTextArea;
 };
 
 #endif // _gtextarea_h

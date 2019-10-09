@@ -1,8 +1,14 @@
 /*
- * File: autogradergui.h
+ * File: guiautograder.h
  * ---------------------
  * 
  * @author Marty Stepp
+ * @version 2019/05/05
+ * - dark mode support
+ * @version 2019/04/23
+ * - reset std::cout/cerr flags on every test run
+ * @version 2019/04/22
+ * - now uses image strip file for icons
  * @version 2018/10/07
  * - icon constants and path fixes
  * @version 2018/10/03
@@ -19,14 +25,23 @@
 #define _guiautograder_h
 
 #include <string>
+#define INTERNAL_INCLUDE 1
 #include "autograder.h"
+#define INTERNAL_INCLUDE 1
 #include "gbutton.h"
+#define INTERNAL_INCLUDE 1
 #include "gcheckbox.h"
+#define INTERNAL_INCLUDE 1
 #include "gcontainer.h"
+#define INTERNAL_INCLUDE 1
 #include "glabel.h"
+#define INTERNAL_INCLUDE 1
 #include "gwindow.h"
+#define INTERNAL_INCLUDE 1
 #include "map.h"
+#define INTERNAL_INCLUDE 1
 #include "unittestdetails.h"
+#undef INTERNAL_INCLUDE
 
 namespace stanfordcpplib {
 namespace autograder {
@@ -40,12 +55,13 @@ public:
     virtual void addCallbackButton(void (* func)(),
                                    const std::string& text,
                                    const std::string& icon);
-    virtual void addCategory(const std::string& categoryName) Q_DECL_OVERRIDE;
+    virtual void addCategory(const std::string& categoryName, const std::string& categoryDescription = "") Q_DECL_OVERRIDE;
     virtual void addTest(const std::string& testName, const std::string& categoryName = "") Q_DECL_OVERRIDE;
     virtual bool autograderYesOrNo(std::string prompt, std::string reprompt = "", std::string defaultValue = "") Q_DECL_OVERRIDE;
     bool catchExceptions() const;
     void clearTestResults();
     void clearTests();
+    virtual bool containsCategory(const std::string& categoryName) Q_DECL_OVERRIDE;
     virtual void displayDiffs(const std::string& expectedOutput, const std::string& studentOutput,
                               const std::string& diffs, const std::string& diffFile = "",
                               int truncateHeight = -1) Q_DECL_OVERRIDE;
@@ -107,6 +123,7 @@ private:
     int getCheckedTestCount() const;
     void minimize(GContainer* category);
     void minimize(GContainer* category, bool minimized);
+    void minimizeAll(bool minimized = true);
     void selectAll(GContainer* category, bool selected);
     void showTestDetails(const std::string& testFullName, bool force = false);
     bool showTestDetailsInSameWindow(const std::string& testFullName) const;
@@ -119,12 +136,18 @@ private:
     static const int DEFAULT_WINDOW_HEIGHT;
     static const int MAX_VALUE_DISPLAY_LENGTH;
     static int MAX_WINDOW_HEIGHT;
+
     static const std::string COLOR_PASS;
+    static const std::string COLOR_PASS_DARK_MODE;
     static const std::string COLOR_FAIL;
+    static const std::string COLOR_FAIL_DARK_MODE;
     static const std::string COLOR_WARN;
-    static std::string COLOR_NORMAL;
+    static const std::string COLOR_WARN_DARK_MODE;
     static const std::string COLOR_ZEBRA_STRIPE_1;
+    static const std::string COLOR_ZEBRA_STRIPE_1_DARK_MODE;
     static const std::string COLOR_ZEBRA_STRIPE_2;
+    static const std::string COLOR_ZEBRA_STRIPE_2_DARK_MODE;
+
     static const std::string ICON_FOLDER;
     static const std::string ICON_ABOUT_FILENAME;
     static const std::string ICON_AUTOGRADE_FILENAME;
@@ -160,6 +183,7 @@ private:
 
     Map<std::string, GContainer*> _allCategories;
     Map<std::string, TestInfo*> _allTestInfo;
+    Map<std::string, QPixmap> _iconStrip;
 
     int _passCount;
     int _testCount;

@@ -3,6 +3,12 @@
  * ----------------
  *
  * @author Marty Stepp
+ * @version 2019/04/23
+ * - moved some event-handling code to GInteractor superclass
+ * @version 2019/04/22
+ * - added setIcon with QIcon and QPixmap
+ * @version 2019/02/02
+ * - destructor now stops event processing
  * @version 2018/10/04
  * - added get/setWordWrap
  * @version 2018/09/04
@@ -42,9 +48,30 @@ GLabel::GLabel(const std::string& text, const std::string& iconFileName, QWidget
     setVisible(false);   // all widgets are not shown until added to a window
 }
 
+GLabel::GLabel(const std::string& text, const QIcon& icon, QWidget* parent)
+        : _gtext(nullptr) {
+    GThread::runOnQtGuiThread([this, parent]() {
+        _iqlabel = new _Internal_QLabel(this, getInternalParent(parent));
+    });
+    setText(text);
+    setIcon(icon);
+    setVisible(false);   // all widgets are not shown until added to a window
+}
+
+GLabel::GLabel(const std::string& text, const QPixmap& icon, QWidget* parent)
+        : _gtext(nullptr) {
+    GThread::runOnQtGuiThread([this, parent]() {
+        _iqlabel = new _Internal_QLabel(this, getInternalParent(parent));
+    });
+    setText(text);
+    setIcon(icon);
+    setVisible(false);   // all widgets are not shown until added to a window
+}
+
 GLabel::~GLabel() {
     // TODO: if (_gtext) { delete _gtext; }
     // TODO: delete _iqlabel;
+    _iqlabel->detach();
     _iqlabel = nullptr;
 }
 
@@ -99,30 +126,6 @@ bool GLabel::hasGText() const {
 
 bool GLabel::isWordWrap() const {
     return _iqlabel->wordWrap();
-}
-
-void GLabel::removeActionListener() {
-    removeEventListener("click");
-}
-
-void GLabel::removeDoubleClickListener() {
-    removeEventListener("doubleclick");
-}
-
-void GLabel::setActionListener(GEventListener func) {
-    setEventListener("click", func);
-}
-
-void GLabel::setActionListener(GEventListenerVoid func) {
-    setEventListener("click", func);
-}
-
-void GLabel::setDoubleClickListener(GEventListener func) {
-    setEventListener("doubleclick", func);
-}
-
-void GLabel::setDoubleClickListener(GEventListenerVoid func) {
-    setEventListener("doubleclick", func);
 }
 
 void GLabel::setBounds(double x, double y, double width, double height) {
@@ -185,6 +188,39 @@ void GLabel::setHeight(double height) {
     ensureGText();   // setting size triggers GText mode
     _gtext->setHeight(height);
     GInteractor::setHeight(height);
+}
+
+void GLabel::setIcon(const QIcon& icon) {
+    GInteractor::setIcon(icon);
+    GThread::runOnQtGuiThread([this, &icon]() {
+        QSize size(16, 16);   // default size
+        if (!icon.availableSizes().empty()) {
+            size = icon.availableSizes()[0];
+        }
+        QPixmap pixmap = icon.pixmap(size);
+        _iqlabel->setPixmap(pixmap);
+        _iqlabel->updateGeometry();
+        _iqlabel->update();
+
+        // TODO: loses text; how to have both icon and text in same label?
+        if (!getText().empty()) {
+            std::cerr << "Warning: a GLabel cannot currently have both text and icon." << std::endl;
+        }
+    });
+}
+
+void GLabel::setIcon(const QPixmap& icon) {
+    GInteractor::setIcon(icon);
+    GThread::runOnQtGuiThread([this, &icon]() {
+        _iqlabel->setPixmap(icon);
+        _iqlabel->updateGeometry();
+        _iqlabel->update();
+
+        // TODO: loses text; how to have both icon and text in same label?
+        if (!getText().empty()) {
+            std::cerr << "Warning: a GLabel cannot currently have both text and icon." << std::endl;
+        }
+    });
 }
 
 void GLabel::setIcon(const std::string& filename, bool retainIconSize) {
@@ -294,11 +330,20 @@ _Internal_QLabel::_Internal_QLabel(GLabel* glabel, QWidget* parent)
     setObjectName(QString::fromStdString("_Internal_QLabel_" + std::to_string(glabel->getID())));
 }
 
+void _Internal_QLabel::detach() {
+    _glabel = nullptr;
+}
+
 void _Internal_QLabel::mouseDoubleClickEvent(QMouseEvent* event) {
     require::nonNull(event, "_Internal_QLabel::mouseDoubleClickEvent", "event");
     QWidget::mouseDoubleClickEvent(event);   // call super
+    if (!_glabel) {
+        return;
+    }
     emit doubleClicked();
-    if (!_glabel->isAcceptingEvent("doubleclick")) return;
+    if (!_glabel->isAcceptingEvent("doubleclick")) {
+        return;
+    }
     GEvent mouseEvent(
                 /* class  */ MOUSE_EVENT,
                 /* type   */ MOUSE_DOUBLE_CLICKED,
@@ -314,6 +359,9 @@ void _Internal_QLabel::mouseDoubleClickEvent(QMouseEvent* event) {
 void _Internal_QLabel::mousePressEvent(QMouseEvent* event) {
     require::nonNull(event, "_Internal_QLabel::mousePressEvent", "event");
     QWidget::mousePressEvent(event);   // call super
+    if (!_glabel) {
+        return;
+    }
 
     // fire the signal/event only for left-clicks
     if (!(event->button() & Qt::LeftButton)) {
@@ -322,7 +370,9 @@ void _Internal_QLabel::mousePressEvent(QMouseEvent* event) {
 
     emit clicked();
 
-    if (!_glabel->isAcceptingEvent("click")) return;
+    if (!_glabel->isAcceptingEvent("click")) {
+        return;
+    }
 
     GEvent actionEvent(
                 /* class  */ ACTION_EVENT,

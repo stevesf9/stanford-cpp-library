@@ -4,6 +4,18 @@
  * This file implements the gconsolewindow.h interface.
  *
  * @author Marty Stepp
+ * @version 2019/04/25
+ * - added hasInputScript
+ * @version 2019/04/16
+ * - bug fix for wrong text color on Mac dark mode
+ * @version 2019/04/10
+ * - toolbar support with icons from icon strip image
+ * @version 2019/04/09
+ * - bug fix for premature input script / compare output popup
+ * - changed default Mac font to Courier New from Menlo
+ * @version 2018/12/27
+ * - bug fix for endless waitForEvent queued events caused by printing text
+ *   to console (bug reported by Keith Schwarz)
  * @version 2018/10/11
  * - bug fixes for shutdown flag, input script hotkeys (e.g. Ctrl+1)
  * @version 2018/10/04
@@ -65,33 +77,33 @@
 
 void setConsolePropertiesQt();
 
-const bool GConsoleWindow::GConsoleWindow::ALLOW_RICH_INPUT_EDITING = true;
-const double GConsoleWindow::DEFAULT_WIDTH = 800;
-const double GConsoleWindow::DEFAULT_HEIGHT = 500;
-const double GConsoleWindow::DEFAULT_X = 10;
-const double GConsoleWindow::DEFAULT_Y = 40;
-const std::string GConsoleWindow::CONFIG_FILE_NAME = "spl-jar-settings.txt";
-const std::string GConsoleWindow::DEFAULT_WINDOW_TITLE = "Console";
-const std::string GConsoleWindow::DEFAULT_FONT_FAMILY = "Monospace";
-const std::string GConsoleWindow::DEFAULT_FONT_WEIGHT = "";
-const int GConsoleWindow::DEFAULT_FONT_SIZE = 12;
-const int GConsoleWindow::MIN_FONT_SIZE = 4;
-const int GConsoleWindow::MAX_FONT_SIZE = 255;
-const std::string GConsoleWindow::DEFAULT_BACKGROUND_COLOR = "white";
-const std::string GConsoleWindow::DEFAULT_ERROR_COLOR = "red";
-const std::string GConsoleWindow::DEFAULT_OUTPUT_COLOR = "black";
-const std::string GConsoleWindow::USER_INPUT_COLOR = "blue";
-GConsoleWindow* GConsoleWindow::_instance = nullptr;
-bool GConsoleWindow::_consoleEnabled = false;
+/*static*/ const bool GConsoleWindow::GConsoleWindow::ALLOW_RICH_INPUT_EDITING = true;
+/*static*/ const double GConsoleWindow::DEFAULT_WIDTH = 900;
+/*static*/ const double GConsoleWindow::DEFAULT_HEIGHT = 550;
+/*static*/ const double GConsoleWindow::DEFAULT_X = 10;
+/*static*/ const double GConsoleWindow::DEFAULT_Y = 40;
+/*static*/ const std::string GConsoleWindow::CONFIG_FILE_NAME = "spl-jar-settings.txt";
+/*static*/ const std::string GConsoleWindow::DEFAULT_WINDOW_TITLE = "Console";
+/*static*/ const std::string GConsoleWindow::DEFAULT_FONT_FAMILY = "Monospace";
+/*static*/ const std::string GConsoleWindow::DEFAULT_FONT_WEIGHT = "";
+/*static*/ const int GConsoleWindow::DEFAULT_FONT_SIZE = 12;
+/*static*/ const int GConsoleWindow::MIN_FONT_SIZE = 4;
+/*static*/ const int GConsoleWindow::MAX_FONT_SIZE = 255;
+/*static*/ const std::string GConsoleWindow::DEFAULT_ERROR_COLOR = "#cc0000";
+/*static*/ const std::string GConsoleWindow::DEFAULT_ERROR_COLOR_DARK_MODE = "#f47862";
+/*static*/ const std::string GConsoleWindow::DEFAULT_USER_INPUT_COLOR = "#0000cc";
+/*static*/ const std::string GConsoleWindow::DEFAULT_USER_INPUT_COLOR_DARK_MODE = "#2c90e5";
+/*static*/ GConsoleWindow* GConsoleWindow::_instance = nullptr;
+/*static*/ bool GConsoleWindow::_consoleEnabled = false;
 
-/* static */ bool GConsoleWindow::consoleEnabled() {
+/*static*/ bool GConsoleWindow::consoleEnabled() {
     return _consoleEnabled;
 }
 
-/* static */ std::string GConsoleWindow::getDefaultFont() {
+/*static*/ std::string GConsoleWindow::getDefaultFont() {
     if (OS::isMac()) {
         // for some reason, using "Monospace" doesn't work for me on Mac testing
-        return "Menlo-"
+        return "Courier New-"
                 + std::to_string(DEFAULT_FONT_SIZE + 1)
                 + (DEFAULT_FONT_WEIGHT.empty() ? "" : ("-" + DEFAULT_FONT_WEIGHT));
     } else {
@@ -101,7 +113,7 @@ bool GConsoleWindow::_consoleEnabled = false;
     }
 }
 
-/* static */ GConsoleWindow* GConsoleWindow::instance() {
+/*static*/ GConsoleWindow* GConsoleWindow::instance() {
     if (!_instance) {
         // initialize Qt system and Qt Console window
         GThread::runOnQtGuiThread([]() {
@@ -115,11 +127,11 @@ bool GConsoleWindow::_consoleEnabled = false;
     return _instance;
 }
 
-/* static */ bool GConsoleWindow::isInitialized() {
+/*static*/ bool GConsoleWindow::isInitialized() {
     return _instance != nullptr;
 }
 
-/* static */ void GConsoleWindow::setConsoleEnabled(bool enabled) {
+/*static*/ void GConsoleWindow::setConsoleEnabled(bool enabled) {
     _consoleEnabled = enabled;
 }
 
@@ -135,6 +147,7 @@ GConsoleWindow::GConsoleWindow()
           _commandHistoryIndex(-1),
           _errorColor(""),
           _outputColor(""),
+          _userInputColor(""),
           _inputBuffer(""),
           _lastSaveFileName(""),
           _cinout_new_buf(nullptr),
@@ -148,77 +161,179 @@ GConsoleWindow::GConsoleWindow()
     loadConfiguration();
 }
 
+/*static*/ Map<std::string, QPixmap> GConsoleWindow::unpackImageStrip(
+        const std::string& imageStripFileName,
+        const Vector<std::string>& imageFiles,
+        int imageSize) {
+    // all images are the same size
+    Vector<GDimension> imageSizes;
+    for (int i = 0; i < imageFiles.size(); i++) {
+        imageSizes.add(GDimension(imageSize, imageSize));
+    }
+    return unpackImageStrip(imageStripFileName, imageFiles, imageSizes);
+}
+
+/*static*/ Map<std::string, QPixmap> GConsoleWindow::unpackImageStrip(
+        const std::string& imageStripFileName,
+        const Vector<std::string>& imageFiles,
+        const Vector<GDimension>& imageSizes) {
+    int iconOffsetX = 0;
+    Map<std::string, QPixmap> imageMap;
+    if (fileExists(imageStripFileName)) {
+        QPixmap pixmap(QString::fromStdString(imageStripFileName));
+        for (int i = 0; i < imageFiles.size(); i++) {
+            std::string imageFile = imageFiles[i];
+            GDimension imageSize = imageSizes[i];
+            QPixmap pixcopy = pixmap.copy(iconOffsetX, 0, static_cast<int>(imageSize.getWidth()), static_cast<int>(imageSize.getHeight()));
+            imageMap[imageFile] = pixcopy;
+            iconOffsetX += static_cast<int>(imageSize.getWidth());
+        }
+    }
+    return imageMap;
+}
+
 void GConsoleWindow::_initMenuBar() {
-    const std::string ICON_FOLDER = "icons/";
+    addToolbar();
+
+    const std::string ICON_STRIP_FILE = "iconstrip.png";
+    const int ICON_SIZE = 16;
+    Vector<std::string> IMAGES {
+        "save.gif",
+        "save_as.gif",
+        "print.gif",
+        "script.gif",
+        "compare_output.gif",
+        "quit.gif",
+        "cut.gif",
+        "copy.gif",
+        "paste.gif",
+        "select_all.gif",
+        "clear_console.gif",
+        "font.gif",
+        "background_color.gif",
+        "text_color.gif",
+        "about.gif",
+        "check_for_updates.gif"
+    };
+    Map<std::string, QPixmap> imageMap = unpackImageStrip(ICON_STRIP_FILE, IMAGES, ICON_SIZE);
 
     // File menu
     addMenu("&File");
-    addMenuItem("File", "&Save", ICON_FOLDER + "save.gif",
+    addMenuItem("File", "&Save", imageMap["save.gif"],
                 [this]() { this->save(); })
                 ->setShortcut(QKeySequence::Save);
 
-    addMenuItem("File", "Save &As...", ICON_FOLDER + "save_as.gif",
+    addMenuItem("File", "Save &As...", imageMap["save_as.gif"],
                 [this]() { this->saveAs(); })
                 ->setShortcut(QKeySequence::SaveAs);
     addMenuSeparator("File");
 
-    addMenuItem("File", "&Print", ICON_FOLDER + "print.gif",
+    addMenuItem("File", "&Print", imageMap["print.gif"],
                 [this]() { this->showPrintDialog(); })
                 ->setShortcut(QKeySequence::Print);
     setMenuItemEnabled("File", "Print", false);
     addMenuSeparator("File");
 
-    addMenuItem("File", "&Load Input Script...", ICON_FOLDER + "script.gif",
+    addMenuItem("File", "&Load Input Script...", imageMap["script.gif"],
                 [this]() { this->showInputScriptDialog(); });
+    if (!imageMap.isEmpty()) {
+        addToolbarItem("Load Input Script...", imageMap["script.gif"],
+                       [this]() { this->showInputScriptDialog(); });
+    }
 
-    addMenuItem("File", "&Compare Output...", ICON_FOLDER + "compare_output.gif",
+    addMenuItem("File", "&Compare Output...", imageMap["compare_output.gif"],
                 [this]() { this->showCompareOutputDialog(); });
+    if (!imageMap.isEmpty()) {
+        addToolbarItem("Compare Output...", imageMap["compare_output.gif"],
+                       [this]() { this->showCompareOutputDialog(); });
+    }
 
-    addMenuItem("File", "&Quit", ICON_FOLDER + "quit.gif",
+    addMenuItem("File", "&Quit", imageMap["quit.gif"],
                 [this]() { this->close(); /* TODO: exit app */ })
                 ->setShortcut(QKeySequence::Quit);
+    if (!imageMap.isEmpty()) {
+        addToolbarSeparator();
+    }
 
     // Edit menu
     addMenu("&Edit");
-    addMenuItem("Edit", "Cu&t", ICON_FOLDER + "cut.gif",
+    addMenuItem("Edit", "Cu&t", imageMap["cut.gif"],
                 [this]() { this->clipboardCut(); })
                 ->setShortcut(QKeySequence::Cut);
+//    if (!imageMap.isEmpty()) {
+//        addToolbarItem("Cut", imageMap["cut.gif"],
+//                       [this]() { this->clipboardCut(); });
+//    }
 
-    addMenuItem("Edit", "&Copy", ICON_FOLDER + "copy.gif",
+    addMenuItem("Edit", "&Copy", imageMap["copy.gif"],
                 [this]() { this->clipboardCopy(); })
                 ->setShortcut(QKeySequence::Copy);
+    if (!imageMap.isEmpty()) {
+        addToolbarItem("Copy", imageMap["copy.gif"],
+                       [this]() { this->clipboardCopy(); });
+    }
 
-    addMenuItem("Edit", "&Paste", ICON_FOLDER + "paste.gif",
+    addMenuItem("Edit", "&Paste", imageMap["paste.gif"],
                 [this]() { this->clipboardPaste(); })
                 ->setShortcut(QKeySequence::Paste);
+    if (!imageMap.isEmpty()) {
+        addToolbarItem("Paste", imageMap["paste.gif"],
+                       [this]() { this->clipboardPaste(); });
+    }
 
-    addMenuItem("Edit", "Select &All", ICON_FOLDER + "select_all.gif",
+    addMenuItem("Edit", "Select &All", imageMap["select_all.gif"],
                 [this]() { this->selectAll(); })
                 ->setShortcut(QKeySequence::SelectAll);
 
-    addMenuItem("Edit", "C&lear Console", ICON_FOLDER + "clear_console.gif",
+    addMenuItem("Edit", "C&lear Console", imageMap["clear_console.gif"],
                 [this]() { this->clearConsole(); })
                 ->setShortcut(QKeySequence(QString::fromStdString("Ctrl+L")));
+    if (!imageMap.isEmpty()) {
+        addToolbarItem("Clear Console", imageMap["clear_console.gif"],
+                       [this]() { this->clearConsole(); });
+        addToolbarSeparator();
+    }
 
     // Options menu
     addMenu("&Options");
-    addMenuItem("Options", "&Font...", ICON_FOLDER + "font.gif",
+    addMenuItem("Options", "&Font...", imageMap["font.gif"],
                 [this]() { this->showFontDialog(); });
+    if (!imageMap.isEmpty()) {
+        addToolbarItem("Font...", imageMap["font.gif"],
+                       [this]() { this->showFontDialog(); });
+    }
 
-    addMenuItem("Options", "&Background Color...", ICON_FOLDER + "background_color.gif",
+    addMenuItem("Options", "&Background Color...", imageMap["background_color.gif"],
                 [this]() { this->showColorDialog(/* background */ true); });
+    if (!imageMap.isEmpty()) {
+        addToolbarItem("Background Color...", imageMap["background_color.gif"],
+                       [this]() { this->showColorDialog(/* background */ true); });
+    }
 
-    addMenuItem("Options", "&Text Color...", ICON_FOLDER + "text_color.gif",
+    addMenuItem("Options", "&Text Color...", imageMap["text_color.gif"],
                 [this]() { this->showColorDialog(/* background */ false); });
+    if (!imageMap.isEmpty()) {
+        addToolbarItem("Text Color...", imageMap["text_color.gif"],
+                       [this]() { this->showColorDialog(/* background */ false); });
+        addToolbarSeparator();
+    }
 
     // Help menu
     addMenu("&Help");
-    addMenuItem("Help", "&About...", ICON_FOLDER + "about.gif",
+    addMenuItem("Help", "&About...", imageMap["about.gif"],
                 [this]() { this->showAboutDialog(); })
                 ->setShortcut(QKeySequence::HelpContents);
+    if (!imageMap.isEmpty()) {
+        addToolbarItem("About...", imageMap["about.gif"],
+                       [this]() { this->showAboutDialog(); });
+    }
 
-    addMenuItem("Help", "&Check for Updates", ICON_FOLDER + "check_for_updates.gif",
+    addMenuItem("Help", "&Check for Updates", imageMap["check_for_updates.gif"],
                 [this]() { this->checkForUpdates(); });
+    if (!imageMap.isEmpty()) {
+        addToolbarItem("Check for Updates", imageMap["check_for_updates.gif"],
+                       [this]() { this->checkForUpdates(); });
+    }
 }
 
 void GConsoleWindow::_initStreams() {
@@ -237,12 +352,14 @@ void GConsoleWindow::_initStreams() {
 
 void GConsoleWindow::_initWidgets() {
     _textArea = new GTextArea();
-    _textArea->setColor("black");
+    _outputColor = _textArea->getColor();
+
+    // BUGFIX: use OS defaults for BG/FG colors (helps w/ Mac dark mode)
+    _textArea->setBackground(GWindow::getDefaultInteractorBackgroundColorInt());
+    _textArea->setColor(GWindow::getDefaultInteractorTextColorInt());
     _textArea->setContextMenuEnabled(false);
-    // _textArea->setEditable(false);
     _textArea->setLineWrap(true);
     _textArea->setFont(getDefaultFont());
-    // _textArea->setRowsColumns(25, 70);
     QTextEdit* rawTextEdit = static_cast<QTextEdit*>(_textArea->getWidget());
     rawTextEdit->setTabChangesFocus(false);
     _textArea->setKeyListener([this](GEvent event) {
@@ -445,7 +562,11 @@ int GConsoleWindow::getColorInt() const {
 }
 
 std::string GConsoleWindow::getErrorColor() const {
-    return _errorColor.empty() ? DEFAULT_ERROR_COLOR : _errorColor;
+    if (!_errorColor.empty()) {
+        return _errorColor;
+    } else {
+        return GWindow::isDarkMode() ? DEFAULT_ERROR_COLOR_DARK_MODE : DEFAULT_ERROR_COLOR;
+    }
 }
 
 std::string GConsoleWindow::getFont() const {
@@ -461,7 +582,15 @@ int GConsoleWindow::getForegroundInt() const {
 }
 
 std::string GConsoleWindow::getOutputColor() const {
-    return _outputColor.empty() ? DEFAULT_OUTPUT_COLOR : _outputColor;
+    return _outputColor.empty() ? GWindow::getDefaultInteractorTextColor() : _outputColor;
+}
+
+std::string GConsoleWindow::getUserInputColor() const {
+    if (!_userInputColor.empty()) {
+        return _userInputColor;
+    } else {
+        return GWindow::isDarkMode() ? DEFAULT_USER_INPUT_COLOR_DARK_MODE : DEFAULT_USER_INPUT_COLOR;
+    }
 }
 
 QTextFragment GConsoleWindow::getUserInputFragment() const {
@@ -512,6 +641,10 @@ int GConsoleWindow::getUserInputEnd() const {
     } else {
         return -1;
     }
+}
+
+bool GConsoleWindow::hasInputScript() const {
+    return !_inputScript.isEmpty();
 }
 
 bool GConsoleWindow::isClearEnabled() const {
@@ -581,9 +714,6 @@ void GConsoleWindow::loadConfiguration() {
 }
 
 void GConsoleWindow::loadInputScript(int number) {
-    if (_shutdown) {
-        return;
-    }
     std::string sep = getDirectoryPathSeparator();
     static std::initializer_list<std::string> directoriesToCheck {
             ".",
@@ -611,14 +741,26 @@ void GConsoleWindow::loadInputScript(int number) {
         }
     }
 
-    if (!inputFile.empty()) {
+    if (!_shutdown && !inputFile.empty()) {
         loadInputScript(inputFile);
         pause(50);
     }
     if (!expectedOutputFile.empty()) {
         GThread::runInNewThreadAsync([this, expectedOutputFile]() {
-            pause(1000);
-            compareOutput(expectedOutputFile);
+            GThread* currentThread = GThread::getCurrentThread();
+            GThread* studentThread = GThread::getStudentThread();
+            if (!studentThread) {
+                return;
+            }
+            const long MAX_TIME_TO_WAIT = 20000;
+            long timeWaited = 0;
+            while (timeWaited < MAX_TIME_TO_WAIT && studentThread->isRunning()) {
+                currentThread->sleep(50);
+                timeWaited += 50;
+            }
+            if (!studentThread->isRunning()) {
+                compareOutput(expectedOutputFile);
+            }
         }, "Compare Output");
     }
 }
@@ -664,9 +806,11 @@ void GConsoleWindow::print(const std::string& str, bool isStdErr) {
         if (!this->_textArea) {
             return;
         }
+        this->_textArea->setEventsEnabled(false);
         this->_textArea->appendFormattedText(strToPrint, isStdErr ? getErrorColor() : getOutputColor());
         this->_textArea->moveCursorToEnd();
         this->_textArea->scrollToBottom();
+        this->_textArea->setEventsEnabled(true);
         _coutMutex.unlock();
     });
 }
@@ -998,7 +1142,7 @@ void GConsoleWindow::processUserInputEnterKey() {
     _cinQueueMutex.unlock();
     _allOutputBuffer << _inputBuffer << std::endl;
     _inputBuffer = "";   // clear input buffer
-    this->_textArea->appendFormattedText("\n", USER_INPUT_COLOR);
+    this->_textArea->appendFormattedText("\n", getUserInputColor());
     _cinMutex.unlock();
 }
 
@@ -1073,7 +1217,7 @@ void GConsoleWindow::processUserInputKey(int key) {
             // append to end of buffer/fragment
             _inputBuffer += keyStr;
             // display in blue highlighted text
-            this->_textArea->appendFormattedText(keyStr, USER_INPUT_COLOR, "*-*-Bold");
+            this->_textArea->appendFormattedText(keyStr, getUserInputColor(), "*-*-Bold");
         }
 
         _cinMutex.unlock();
@@ -1109,7 +1253,7 @@ std::string GConsoleWindow::readLine() {
             GThread::runOnQtGuiThreadAsync([this, line]() {
                 _coutMutex.lock();
                 _allOutputBuffer << line << std::endl;
-                _textArea->appendFormattedText(line + "\n", USER_INPUT_COLOR, "*-*-Bold");
+                _textArea->appendFormattedText(line + "\n", getUserInputColor(), "*-*-Bold");
                 _coutMutex.unlock();
             });
         }
@@ -1317,6 +1461,10 @@ void GConsoleWindow::setUserInput(const std::string& userInput) {
     for (int i = 0; i < (int) userInput.length(); i++) {
         processUserInputKey(userInput[i]);
     }
+}
+
+void GConsoleWindow::setUserInputColor(const std::string& userInputColor) {
+    _userInputColor = userInputColor;
 }
 
 void GConsoleWindow::showAboutDialog() {

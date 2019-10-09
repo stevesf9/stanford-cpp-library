@@ -1,6 +1,6 @@
 var searchData=
 [
-  ['compare',['compare',['../classDeque.html#ac12ad2761ec7037f8866b726424a81e2',1,'Deque::compare()'],['../classPriorityQueue.html#ac12ad2761ec7037f8866b726424a81e2',1,'PriorityQueue::compare()']]],
+  ['compare',['compare',['../classPriorityQueue.html#ac12ad2761ec7037f8866b726424a81e2',1,'PriorityQueue']]],
   ['initializelibrary',['initializeLibrary',['../classGThread.html#a4f1fcd681e2cf92d1b04e5e8a33dbe47',1,'GThread']]],
   ['sparsegrid',['SparseGrid',['../classSparseGrid_1_1SparseGridRow.html#a5d011ba21988cd3a0eba846ebda2e527',1,'SparseGrid::SparseGridRow::SparseGrid()'],['../classSparseGrid_1_1SparseGridRowConst.html#a5d011ba21988cd3a0eba846ebda2e527',1,'SparseGrid::SparseGridRowConst::SparseGrid()']]],
   ['sparsegridrow',['SparseGridRow',['../classSparseGrid.html#a7b596e3a8decb7689f3928f0846b5b74',1,'SparseGrid']]],

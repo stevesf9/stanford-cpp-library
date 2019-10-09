@@ -2,6 +2,19 @@
  * File: gcanvas.cpp
  * -----------------
  *
+ * @author Marty Stepp
+ * @version 2019/05/01
+ * - added createArgbPixel
+ * - bug fixes related to save / setPixels with alpha transparency
+ * @version 2019/04/23
+ * - bug fix for loading canvas from file on Windows related to istream change
+ * - moved most event listener code to GInteractor superclass
+ * @version 2019/03/07
+ * - added support for loading canvas directly from istream (htiek)
+ * @version 2019/02/06
+ * - fixed mouse wheel listeners to work even if no actual scroll area exists
+ * @version 2019/02/02
+ * - destructor now stops event processing
  * @version 2018/09/20
  * - added read/write lock for canvas contents to avoid race conditions
  * @version 2018/09/04
@@ -33,6 +46,13 @@
 #define CHAR_TO_HEX(ch) ((ch >= '0' && ch <= '9') ? (ch - '0') : (ch - 'a' + 10))
 
 const int GCanvas::WIDTH_HEIGHT_MAX = 65535;
+
+int GCanvas::createArgbPixel(int alpha, int red, int green, int blue) {
+    if (alpha < 0 || alpha > 255 || red < 0 || red > 255 || green < 0 || green > 255 || blue < 0 || blue > 255) {
+        error("ARGB values must be between 0-255");
+    }
+    return (alpha << 24 & 0xff000000) | (red << 16 & 0xff0000) | (green << 8 & 0x00ff00) | (blue & 0x0000ff);
+}
 
 int GCanvas::createRgbPixel(int red, int green, int blue) {
     if (red < 0 || red > 255 || green < 0 || green > 255 || blue < 0 || blue > 255) {
@@ -78,6 +98,15 @@ GCanvas::GCanvas(const std::string& filename, QWidget* parent)
     load(filename);
 }
 
+GCanvas::GCanvas(std::istream& source, QWidget* parent)
+        : _backgroundImage(nullptr),
+          _filename("std::istream data") {
+    init(/* width */ -1, /* height */ -1, /* background */ 0xffffff, parent);
+    if (!loadFromStream(source)) {
+        error("GCanvas::constructor: could not load image from input stream");
+    }
+}
+
 GCanvas::GCanvas(double width, double height, int rgbBackground, QWidget* parent)
         : _backgroundImage(nullptr),
           _filename("") {
@@ -87,7 +116,12 @@ GCanvas::GCanvas(double width, double height, int rgbBackground, QWidget* parent
 GCanvas::GCanvas(double width, double height, const std::string& rgbBackground, QWidget* parent)
         : _backgroundImage(nullptr),
           _filename("") {
-    init(width, height, GColor::convertColorToRGB(rgbBackground), parent);
+    _backgroundColor = rgbBackground;
+    init(width, height,
+         GColor::hasAlpha(rgbBackground)
+                ? GColor::convertColorToARGB(rgbBackground)
+                : GColor::convertColorToRGB(rgbBackground),
+         parent);
 }
 
 void GCanvas::init(double width, double height, int rgbBackground, QWidget* parent) {
@@ -97,7 +131,14 @@ void GCanvas::init(double width, double height, int rgbBackground, QWidget* pare
     GThread::runOnQtGuiThread([this, rgbBackground, parent]() {
         _iqcanvas = new _Internal_QCanvas(this, getInternalParent(parent));
         _gcompound.setWidget(_iqcanvas);
-        _backgroundColor = GColor::convertRGBToColor(rgbBackground);
+        int alpha = getAlpha(rgbBackground);
+        if (GColor::hasAlpha(_backgroundColor)) {
+            // empty
+        } else if (alpha > 0 && alpha < 255) {
+            _backgroundColor = GColor::convertARGBToColor(rgbBackground);
+        } else {
+            _backgroundColor = GColor::convertRGBToColor(rgbBackground);
+        }
         _backgroundColorInt = rgbBackground;
     });
 
@@ -112,7 +153,8 @@ void GCanvas::init(double width, double height, int rgbBackground, QWidget* pare
 }
 
 GCanvas::~GCanvas() {
-    // TODO: delete _GCanvas;
+    // TODO: delete _iqcanvas;
+    _iqcanvas->detach();
     _iqcanvas = nullptr;
 }
 
@@ -373,11 +415,17 @@ void GCanvas::fillRegion(double x, double y, double width, double height, int rg
     checkColor("GCanvas::fillRegion", rgb);
     bool wasAutoRepaint = isAutoRepaint();
     setAutoRepaint(false);
-    for (int r = static_cast<int>(y); r < y + height; r++) {
-        for (int c = static_cast<int>(x); c < x + width; c++) {
-            setRGB(/* x */ c, /* y */ r, rgb);
+    GThread::runOnQtGuiThread([this, x, y, width, height, rgb]() {
+        ensureBackgroundImage();
+        lockForWrite();
+        int argb = rgb | 0xff000000;
+        for (int yy = static_cast<int>(y); yy < y + height; yy++) {
+            for (int xx = static_cast<int>(x); xx < x + width; xx++) {
+                _backgroundImage->setPixel(xx, yy, static_cast<unsigned int>(argb));
+            }
         }
-    }
+        unlock();
+    });
     setAutoRepaint(wasAutoRepaint);
     conditionalRepaint();
 }
@@ -412,8 +460,8 @@ void GCanvas::fromGrid(const Grid<int>& grid) {
         lockForWrite();
         for (int row = 0, width = grid.width(), height = grid.height(); row < height; row++) {
             for (int col = 0; col < width; col++) {
-                // setPixel(col, row, grid[row][col]);
-                _backgroundImage->setPixel(col, row, static_cast<unsigned int>(grid[row][col]) | 0xff000000);
+                int argb = GColor::fixAlpha(grid[row][col]);
+                _backgroundImage->setPixel(col, row, static_cast<unsigned int>(argb));
             }
         }
         unlock();
@@ -487,9 +535,11 @@ int GCanvas::getPixelARGB(double x, double y) const {
 Grid<int> GCanvas::getPixels() const {
     ensureBackgroundImageConstHack();
     lockForReadConst();
-    Grid<int> grid(static_cast<int>(getHeight()), static_cast<int>(getWidth()));
-    for (int y = 0; y < static_cast<int>(getHeight()); y++) {
-        for (int x = 0; x < static_cast<int>(getWidth()); x++) {
+    int w = static_cast<int>(getWidth());
+    int h = static_cast<int>(getHeight());
+    Grid<int> grid(h, w);
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
             grid[y][x] = _backgroundImage->pixel(x, y) & 0x00ffffff;
         }
     }
@@ -535,6 +585,7 @@ void GCanvas::load(const std::string& filename) {
         lockForWrite();
         if (!_backgroundImage->load(QString::fromStdString(filename))) {
             hasError = true;
+            unlock();
             return;
         }
 
@@ -548,6 +599,31 @@ void GCanvas::load(const std::string& filename) {
     if (hasError) {
         error("GCanvas::load: failed to load from " + filename);
     }
+}
+
+bool GCanvas::loadFromStream(std::istream& input) {
+    // buffer bytes into a std::string
+    std::ostringstream byteStream;
+    byteStream << input.rdbuf();
+    std::string bytes = byteStream.str();
+
+    bool hasError = false;
+    GThread::runOnQtGuiThread([&, this]() {
+        ensureBackgroundImage();
+        lockForWrite();
+        if (!_backgroundImage->loadFromData(reinterpret_cast<const uchar *>(bytes.data()), bytes.length())) {
+            hasError = true;
+            unlock();
+            return;
+        }
+
+        GInteractor::setSize(_backgroundImage->width(), _backgroundImage->height());
+        // setSize(_qimage->width(), _qimage->height());
+        unlock();
+        conditionalRepaint();
+    });
+
+    return !hasError;
 }
 
 void GCanvas::notifyOfResize(double width, double height) {
@@ -604,32 +680,6 @@ void GCanvas::removeAll() {
     });
 }
 
-void GCanvas::removeClickListener() {
-    removeEventListener("click");
-}
-
-void GCanvas::removeDoubleClickListener() {
-    removeEventListener("doubleclick");
-}
-
-void GCanvas::removeKeyListener() {
-    removeEventListeners({"keypress",
-                         "keyrelease",
-                         "keytype"});
-}
-
-void GCanvas::removeMouseListener() {
-    removeEventListeners({"click",
-                         "mousedrag",
-                         "mouseenter",
-                         "mouseexit",
-                         "mousemove",
-                         "mousepress",
-                         "mouserelease",
-                         "mousewheeldown",
-                         "mousewheelup"});
-}
-
 void GCanvas::repaint() {
     GThread::runOnQtGuiThreadAsync([this]() {
         lockForRead();
@@ -644,7 +694,6 @@ void GCanvas::repaintRegion(int x, int y, int width, int height) {
         lockForRead();
         getWidget()->repaint(x, y, width, height);
         unlock();
-        // _gcompound.repaintRegion(x, y, width, height);   // runs on Qt GUI thread
     });
 }
 
@@ -718,28 +767,12 @@ void GCanvas::setBackground(const std::string& color) {
     setBackground(GColor::convertColorToRGB(color));
 }
 
-void GCanvas::setClickListener(GEventListener func) {
-    setEventListener("click", func);
-}
-
-void GCanvas::setClickListener(GEventListenerVoid func) {
-    setEventListener("click", func);
-}
-
 void GCanvas::setColor(int color) {
     GDrawingSurface::setColor(color);
 }
 
 void GCanvas::setColor(const std::string& color) {
     setColor(GColor::convertColorToRGB(color));
-}
-
-void GCanvas::setDoubleClickListener(GEventListener func) {
-    setEventListener("doubleclick", func);
-}
-
-void GCanvas::setDoubleClickListener(GEventListenerVoid func) {
-    setEventListener("doubleclick", func);
 }
 
 void GCanvas::setFont(const QFont& font) {
@@ -764,9 +797,7 @@ void GCanvas::setKeyListener(GEventListener func) {
         _iqcanvas->setFocusPolicy(Qt::StrongFocus);
         unlock();
     });
-    setEventListeners({"keypress",
-                       "keyrelease",
-                       "keytype"}, func);
+    GInteractor::setKeyListener(func);   // call super
 }
 
 void GCanvas::setKeyListener(GEventListenerVoid func) {
@@ -775,33 +806,7 @@ void GCanvas::setKeyListener(GEventListenerVoid func) {
         _iqcanvas->setFocusPolicy(Qt::StrongFocus);
         unlock();
     });
-    setEventListeners({"keypress",
-                       "keyrelease",
-                       "keytype"}, func);
-}
-
-void GCanvas::setMouseListener(GEventListener func) {
-    setEventListeners({"click",
-                       "mousedrag",
-                       "mouseenter",
-                       "mouseexit",
-                       "mousemove",
-                       "mousepress",
-                       "mouserelease",
-                       "mousewheeldown",
-                       "mousewheelup"}, func);
-}
-
-void GCanvas::setMouseListener(GEventListenerVoid func) {
-    setEventListeners({"click",
-                       "mousedrag",
-                       "mouseenter",
-                       "mouseexit",
-                       "mousemove",
-                       "mousepress",
-                       "mouserelease",
-                       "mousewheeldown",
-                       "mousewheelup"}, func);
+    GInteractor::setKeyListener(func);   // call super
 }
 
 void GCanvas::setPixel(double x, double y, int rgb) {
@@ -810,10 +815,11 @@ void GCanvas::setPixel(double x, double y, int rgb) {
     GThread::runOnQtGuiThread([this, x, y, rgb]() {
         ensureBackgroundImage();
         lockForWrite();
+        int argb = GColor::fixAlpha(rgb);
         _backgroundImage->setPixel(
                 static_cast<int>(x),
                 static_cast<int>(y),
-                static_cast<unsigned int>(rgb) | 0xff000000);
+                static_cast<unsigned int>(argb));
         unlock();
         conditionalRepaintRegion(
                 static_cast<int>(x),
@@ -824,7 +830,9 @@ void GCanvas::setPixel(double x, double y, int rgb) {
 }
 
 void GCanvas::setPixel(double x, double y, int r, int g, int b) {
-    setPixel(x, y, GColor::convertRGBToRGB(r, g, b) | 0xff000000);
+    int rgb = GColor::convertRGBToRGB(r, g, b);
+    int argb = rgb | 0xff000000;
+    setPixel(x, y, argb);
 }
 
 void GCanvas::setPixelARGB(double x, double y, int argb) {
@@ -844,6 +852,7 @@ void GCanvas::setPixelARGB(double x, double y, int a, int r, int g, int b) {
 }
 
 void GCanvas::setPixels(const Grid<int>& pixels) {
+    // TODO: is this redundant with fromGrid?
     ensureBackgroundImage();
     if (pixels.width() != (int) getWidth() || pixels.height() != (int) getHeight()) {
         // TODO
@@ -852,9 +861,10 @@ void GCanvas::setPixels(const Grid<int>& pixels) {
     }
     GThread::runOnQtGuiThread([this, &pixels]() {
         lockForWrite();
-        for (int y = 0; y < pixels.height(); y++) {
-            for (int x = 0; x < pixels.width(); x++) {
-                _backgroundImage->setPixel(x, y, pixels[y][x]);
+        for (int y = 0, w = pixels.width(), h = pixels.height(); y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int argb = pixels[y][x] | 0xff000000;
+                _backgroundImage->setPixel(x, y, static_cast<unsigned int>(argb));
             }
         }
         unlock();
@@ -938,20 +948,32 @@ _Internal_QCanvas::_Internal_QCanvas(GCanvas* gcanvas, QWidget* parent)
     setMouseTracking(true);   // causes mouse move events to occur
 }
 
+void _Internal_QCanvas::detach() {
+    _gcanvas = nullptr;
+}
+
 void _Internal_QCanvas::enterEvent(QEvent* event) {
     QWidget::enterEvent(event);   // call super
-    if (!_gcanvas->isAcceptingEvent("mouseenter")) return;
+    if (!_gcanvas || !_gcanvas->isAcceptingEvent("mouseenter")) {
+        return;
+    }
     _gcanvas->fireGEvent(event, MOUSE_ENTERED, "mouseenter");
 }
 
 void _Internal_QCanvas::keyPressEvent(QKeyEvent* event) {
     QWidget::keyPressEvent(event);   // call super
-    if (!_gcanvas->isAcceptingEvent("keypress")) return;
+    if (!_gcanvas || !_gcanvas->isAcceptingEvent("keypress")) {
+        return;
+    }
     _gcanvas->fireGEvent(event, KEY_PRESSED, "keypress");
 }
 
 void _Internal_QCanvas::keyReleaseEvent(QKeyEvent* event) {
     QWidget::keyReleaseEvent(event);   // call super
+    if (!_gcanvas) {
+        return;
+    }
+
     if (_gcanvas->isAcceptingEvent("keyrelease")) {
         _gcanvas->fireGEvent(event, KEY_RELEASED, "keyrelease");
     }
@@ -962,14 +984,18 @@ void _Internal_QCanvas::keyReleaseEvent(QKeyEvent* event) {
 
 void _Internal_QCanvas::leaveEvent(QEvent* event) {
     QWidget::leaveEvent(event);   // call super
-    if (!_gcanvas->isAcceptingEvent("mouseexit")) return;
+    if (!_gcanvas || !_gcanvas->isAcceptingEvent("mouseexit")) {
+        return;
+    }
     _gcanvas->fireGEvent(event, MOUSE_EXITED, "mouseexit");
 }
 
 void _Internal_QCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
     QWidget::mouseDoubleClickEvent(event);   // call super
     emit doubleClicked();
-    if (!_gcanvas->isAcceptingEvent("doubleclick")) return;
+    if (!_gcanvas || !_gcanvas->isAcceptingEvent("doubleclick")) {
+        return;
+    }
     GEvent mouseEvent(
                 /* class  */ MOUSE_EVENT,
                 /* type   */ MOUSE_DOUBLE_CLICKED,
@@ -984,8 +1010,13 @@ void _Internal_QCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
 
 void _Internal_QCanvas::mouseMoveEvent(QMouseEvent* event) {
     QWidget::mouseMoveEvent(event);   // call super
+    if (!_gcanvas) {
+        return;
+    }
     if (!_gcanvas->isAcceptingEvent("mousemove")
-            && !_gcanvas->isAcceptingEvent("mousedrag")) return;
+            && !_gcanvas->isAcceptingEvent("mousedrag")) {
+        return;
+    }
     _gcanvas->fireGEvent(event, MOUSE_MOVED, "mousemove");
     if (event->buttons() != 0) {
         // mouse drag
@@ -995,12 +1026,17 @@ void _Internal_QCanvas::mouseMoveEvent(QMouseEvent* event) {
 
 void _Internal_QCanvas::mousePressEvent(QMouseEvent* event) {
     QWidget::mousePressEvent(event);   // call super
-    if (!_gcanvas->isAcceptingEvent("mousepress")) return;
+    if (!_gcanvas || !_gcanvas->isAcceptingEvent("mousepress")) {
+        return;
+    }
     _gcanvas->fireGEvent(event, MOUSE_PRESSED, "mousepress");
 }
 
 void _Internal_QCanvas::mouseReleaseEvent(QMouseEvent* event) {
     QWidget::mouseReleaseEvent(event);   // call super
+    if (!_gcanvas) {
+        return;
+    }
     if (_gcanvas->isAcceptingEvent("mouserelease")) {
         _gcanvas->fireGEvent(event, MOUSE_RELEASED, "mouserelease");
     }
@@ -1012,6 +1048,9 @@ void _Internal_QCanvas::mouseReleaseEvent(QMouseEvent* event) {
 
 void _Internal_QCanvas::paintEvent(QPaintEvent* event) {
     QWidget::paintEvent(event);   // call super
+    if (!_gcanvas) {
+        return;
+    }
 
     QPainter painter(this);
     // g.setCompositionMode(QPainter::CompositionMode_DestinationOver);
@@ -1024,6 +1063,9 @@ void _Internal_QCanvas::paintEvent(QPaintEvent* event) {
 
 void _Internal_QCanvas::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);   // call super
+    if (!_gcanvas) {
+        return;
+    }
     QSize size = event->size();
     _gcanvas->notifyOfResize(size.width(), size.height());
 }
@@ -1042,12 +1084,16 @@ QSize _Internal_QCanvas::sizeHint() const {
 
 void _Internal_QCanvas::wheelEvent(QWheelEvent* event) {
     QWidget::wheelEvent(event);   // call super
-    if (event->pixelDelta().y() < 0) {
+    if (!_gcanvas) {
+        return;
+    }
+    QPoint delta = event->angleDelta();
+    if (delta.y() < 0) {
         // scroll down
         if (_gcanvas->isAcceptingEvent("mousewheeldown")) {
             _gcanvas->fireGEvent(event, MOUSE_WHEEL_DOWN, "mousewheeldown");
         }
-    } else if (event->pixelDelta().y() > 0) {
+    } else if (delta.y() > 0) {
         // scroll up
         if (_gcanvas->isAcceptingEvent("mousewheelup")) {
             _gcanvas->fireGEvent(event, MOUSE_WHEEL_UP, "mousewheelup");

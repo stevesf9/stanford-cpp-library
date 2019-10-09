@@ -5,6 +5,10 @@
  * by student code on the console.
  * 
  * @author Marty Stepp
+ * @version 2019/04/16
+ * - filter Qt/std thread methods from stack trace
+ * @version 2019/04/02
+ * - small fix for warning about -Wreturn-std-move on string exception
  * @version 2018/10/18
  * - added set_unexpected handler (used by autograders when errors are thrown)
  * - added some new function names to filter from stack traces
@@ -45,6 +49,7 @@
 #define INTERNAL_INCLUDE 1
 #include "exceptions.h"
 #include <csignal>
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <string>
@@ -98,7 +103,7 @@ STATIC_CONST_VARIABLE_DECLARE_COLLECTION(Vector<int>, SIGNALS_HANDLED, SIGSEGV, 
 static void signalHandlerDisable();
 static void signalHandlerEnable();
 static void stanfordCppLibSignalHandler(int sig);
-static void stanfordCppLibTerminateHandler();
+[[noreturn]] static void stanfordCppLibTerminateHandler();
 static void stanfordCppLibUnexpectedHandler();
 
 std::string cleanupFunctionNameForStackTrace(std::string function) {
@@ -116,6 +121,7 @@ std::string cleanupFunctionNameForStackTrace(std::string function) {
     stringReplaceInPlace(function, "basic_ofstream", "ofstream");
     stringReplaceInPlace(function, "basic_ifstream", "ifstream");
     stringReplaceInPlace(function, "basic_string", "string");
+    stringReplaceInPlace(function, "stanfordcpplib::collections::GenericSet", "Set");
 
     // remove empty/unknown function names
     stringReplaceInPlace(function, "?? ??:0", "");
@@ -185,10 +191,19 @@ void myInvalidParameterHandler(const wchar_t* expression,
 }
 
 LONG WINAPI UnhandledException(LPEXCEPTION_POINTERS exceptionInfo) {
-    if (exceptionInfo && exceptionInfo->ContextRecord && exceptionInfo->ContextRecord->Eip) {
-        // stacktrace::fakeCallStackPointer() = (void*) exceptionInfo->ContextRecord->Eip;
+    // dear student: if you get a compiler error about 'Eip' not being found here,
+    // it means you're using a 64-bit compiler like the MS Visual C++ compiler,
+    // and not the 32-bit MinGW compiler we instructed you to install.
+    // Please re-install Qt Creator with the proper compiler (MinGW 32-bit) enabled.
+#if _WIN64
+    if (exceptionInfo && exceptionInfo->ContextRecord && exceptionInfo->ContextRecord->Rip) {
         stacktrace::fakeCallStackPointer() = (void*) exceptionInfo;
     }
+#else
+    if (exceptionInfo && exceptionInfo->ContextRecord && exceptionInfo->ContextRecord->Eip) {
+        stacktrace::fakeCallStackPointer() = (void*) exceptionInfo;
+    }
+#endif // _WIN64
     DWORD code = exceptionInfo->ExceptionRecord->ExceptionCode;
     if (code == EXCEPTION_STACK_OVERFLOW || code == EXCEPTION_FLT_STACK_CHECK) {
         stanfordCppLibSignalHandler(SIGSTACK);
@@ -271,9 +286,18 @@ bool shouldFilterOutFromStackTrace(const std::string& function) {
         "__cxa_rethrow",
         "__cxa_call_terminate",
         "__cxa_call_unexpected",
+        "__func::",
+        "__function::",
         "_endthreadex",
+        "_Function_base::_Base_manager::",
         "_Function_handler",
         "_Internal_",
+        "__invoke_impl",
+        "__invoke_result::type",
+        "__invoke_void",
+        "__unexpected",
+        "thread::_Invoker",
+        "thread::_State_impl",
         "_M_invoke",
         "_sigtramp",
         "autograderMain",
@@ -281,17 +305,24 @@ bool shouldFilterOutFromStackTrace(const std::string& function) {
         "call_stack_gcc.cpp",
         "call_stack_windows.cpp",
         "crtexe.c",
+        "decltype(forward",
         "ErrorException::ErrorException",
         "exceptions.cpp",
         "function::operator",
         "GetModuleFileName",
         "GetProfileString",
         // "GStudentThread::run",
+        "GThreadQt::run",
+        "GThreadQt::start",
+        "GThreadStd::run",
+        "GThreadStd::start",
         "InitializeExceptionChain",
         "KnownExceptionFilter",
         "M_invoke",
         "multimain.cpp",
         // "operator",
+        "pthread_body",
+        "pthread_start",
         "printStackTrace",
         // "QAbstractItemModel::",
         // "QAbstractProxyModel::",
@@ -301,9 +332,11 @@ bool shouldFilterOutFromStackTrace(const std::string& function) {
         "QMetaMethod::",
         "QMetaObject::",
         "QObjectPrivate::",
+        "QtGui::startBackgroundEventLoop",
         // "QWidget::",
         "QWidgetBackingStore::",
         "QWindowSystemInterface::",
+        "require::_errorMessage",
         "shouldFilterOutFromStackTrace",
         "stacktrace::",
         "stanfordCppLibPosixSignalHandler",
@@ -374,11 +407,11 @@ void printStackTrace(std::ostream& out) {
     if (lineStrLength > 0) {
         out << "*** Stack trace (line numbers are approximate):" << std::endl;
         if (STATIC_VARIABLE(STACK_TRACE_SHOW_TOP_BOTTOM_BARS)) {
-            out << "*** "
-                      << std::setw(lineStrLength) << std::left
-                      << "file:line" << "  " << "function" << std::endl;
-            out << "*** "
-                      << std::string(lineStrLength + 2 + funcNameLength, '=') << std::endl;
+            std::ostringstream lineout;
+            lineout << "*** " << std::setw(lineStrLength) << std::left
+                    << "file:line" << "  " << "function" << std::endl
+                    << "*** " << std::string(lineStrLength + 2 + funcNameLength, '=') << std::endl;
+            out << lineout.str() << std::endl;
         }
     } else {
         out << "*** Stack trace:" << std::endl;
@@ -434,8 +467,12 @@ void printStackTrace(std::ostream& out) {
             lineStr = "line " + std::to_string(entry.line);
         }
         
-        out << "*** " << std::left << std::setw(lineStrLength) << lineStr
-                  << "  " << entry.function << std::endl;
+        // we use a temporary 'lineout' because cerr aggressively flushes on <<,
+        // leading to awkward line breaks in the output pane
+        std::ostringstream lineout;
+        lineout << "*** " << std::left << std::setw(lineStrLength) << lineStr
+                  << "  " << entry.function;
+        out << lineout.str() << std::endl;
         
         // don't show entries beneath the student's main() function, for simplicity
         if (entry.function == "main"
@@ -451,16 +488,14 @@ void printStackTrace(std::ostream& out) {
     }
 
     if (STATIC_VARIABLE(STACK_TRACE_SHOW_TOP_BOTTOM_BARS) && lineStrLength > 0) {
-        out << "*** "
-                  << std::string(lineStrLength + 2 + funcNameLength, '=') << std::endl;
+        std::ostringstream lineout;
+        lineout << "*** " << std::string(lineStrLength + 2 + funcNameLength, '=');
+        out << lineout.str() << std::endl;
     }
     
-//    out << "***" << std::endl;
-//    out << "*** NOTE:" << std::endl;
-//    out << "*** Any line numbers listed above are approximate." << std::endl;
-//    out << "*** To learn more about why the program crashed, we" << std::endl;
-//    out << "*** suggest running your program under the debugger." << std::endl;
-    
+    out << "***" << std::endl;
+    out << "*** To learn more about the crash, we strongly" << std::endl;
+    out << "*** suggest running your program under the debugger." << std::endl;
     out << "***" << std::endl;
 }
 
@@ -477,8 +512,8 @@ void printStackTrace(std::ostream& out) {
     std::string __desc = (desc); \
     if ((!__kind.empty())) { stringReplaceInPlace(msg, DEFAULT_EXCEPTION_KIND, __kind); } \
     if ((!__desc.empty())) { stringReplaceInPlace(msg, DEFAULT_EXCEPTION_DETAILS, __desc); } \
-    std::cout.flush(); \
     out << msg; \
+    out.flush(); \
     printStackTrace(out); \
     THROW_NOT_ON_WINDOWS(ex); \
     }
@@ -489,7 +524,6 @@ void printStackTrace(std::ostream& out) {
     std::string __desc = (desc); \
     if ((!__kind.empty())) { stringReplaceInPlace(msg, DEFAULT_EXCEPTION_KIND, __kind); } \
     if ((!__desc.empty())) { stringReplaceInPlace(msg, DEFAULT_EXCEPTION_DETAILS, __desc); } \
-    std::cout.flush(); \
     out << msg; \
     printStackTrace(out); \
     ErrorException errorEx(out.str()); \
@@ -591,8 +625,8 @@ static void stanfordCppLibSignalHandler(int sig) {
     std::cerr << std::endl;
     std::cerr << "***" << std::endl;
     std::cerr << "*** STANFORD C++ LIBRARY" << std::endl;
-    std::cerr << "*** " << SIGNAL_KIND << " occurred during program execution." << std::endl;
-    std::cerr << "*** " << SIGNAL_DETAILS << std::endl;;
+    std::cerr << (std::string("*** ") + SIGNAL_KIND + " occurred during program execution.") << std::endl;
+    std::cerr << (std::string("*** ") + SIGNAL_DETAILS) << std::endl;
     std::cerr << "***" << std::endl;
     
 //    if (sig != SIGSTACK) {
@@ -636,7 +670,7 @@ static std::string insertStarsBeforeEachLine(const std::string& s) {
  * A general handler for any uncaught exception.
  * Prints details about the exception and then tries to print a stack trace.
  */
-static void stanfordCppLibTerminateHandler() {
+[[noreturn]] static void stanfordCppLibTerminateHandler() {
     std::string DEFAULT_EXCEPTION_KIND = "An exception";
     std::string DEFAULT_EXCEPTION_DETAILS = "(unknown exception details)";
     
@@ -660,7 +694,7 @@ static void stanfordCppLibTerminateHandler() {
         }
     } catch (const std::exception& ex) {
         FILL_IN_EXCEPTION_TRACE(ex, "A C++ exception", insertStarsBeforeEachLine(ex.what()));
-    } catch (std::string str) {
+    } catch (const std::string& str) {
         FILL_IN_EXCEPTION_TRACE(str, "A string exception", insertStarsBeforeEachLine(str));
     } catch (char const* str) {
         FILL_IN_EXCEPTION_TRACE(str, "A string exception", insertStarsBeforeEachLine(str));
@@ -673,11 +707,13 @@ static void stanfordCppLibTerminateHandler() {
     } catch (bool b) {
         FILL_IN_EXCEPTION_TRACE(b, "A bool exception", boolToString(b));
     } catch (double d) {
-        FILL_IN_EXCEPTION_TRACE(d, "A double exception", std::to_string(d));
+        FILL_IN_EXCEPTION_TRACE(d, "A double exception", realToString(d));
     } catch (...) {
         std::string ex = "Unknown";
         FILL_IN_EXCEPTION_TRACE(ex, "An exception", std::string());
     }
+
+    abort();   // terminate the program with a SIGABRT signal
 }
 
 /*
@@ -712,7 +748,7 @@ static void stanfordCppLibUnexpectedHandler() {
         message = str;
     } catch (double d) {
         kind = "double";
-        message = std::to_string(d);
+        message = realToString(d);
     } catch (const ErrorException& ex) {
         kind = "error";
         message = ex.what();

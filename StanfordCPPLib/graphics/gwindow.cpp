@@ -2,6 +2,20 @@
  * File: gwindow.cpp
  * -----------------
  *
+ * @author Marty Stepp
+ * @version 2019/05/05
+ * - added static method for isDarkMode checking support
+ * - added static methods to ask for system default widget bg/fg color
+ * @version 2019/04/27
+ * - fixed more bugs with getting/setting window size and location
+ * @version 2019/04/25
+ * - fixed bugs with getting window geometry and requesting focus
+ * @version 2019/04/12
+ * - moved pause() headless mode implementation (empty) to console.cpp
+ * @version 2019/04/09
+ * - added toolbar support
+ * @version 2019/02/02
+ * - destructor now stops event processing
  * @version 2018/10/20
  * - added high-density screen features
  * @version 2018/10/11
@@ -34,6 +48,7 @@
 #include <QStatusBar>
 #include <QThread>
 #include <QTimer>
+#include <QToolBar>
 #define INTERNAL_INCLUDE 1
 #include "filelib.h"
 #define INTERNAL_INCLUDE 1
@@ -46,6 +61,8 @@
 #include "glabel.h"
 #define INTERNAL_INCLUDE 1
 #include "glayout.h"
+#define INTERNAL_INCLUDE 1
+#include "gtextfield.h"
 #define INTERNAL_INCLUDE 1
 #include "gthread.h"
 #define INTERNAL_INCLUDE 1
@@ -68,7 +85,8 @@ GWindow::GWindow(bool visible)
           _contentPane(nullptr),
           _canvas(nullptr),
           _resizable(true),
-          _closeOperation(GWindow::CLOSE_DISPOSE) {
+          _closeOperation(GWindow::CLOSE_DISPOSE),
+          _toolbar(nullptr) {
     _init(DEFAULT_WIDTH, DEFAULT_HEIGHT, visible);
 }
 
@@ -77,7 +95,8 @@ GWindow::GWindow(double width, double height, bool visible)
           _contentPane(nullptr),
           _canvas(nullptr),
           _resizable(true),
-          _closeOperation(GWindow::CLOSE_DISPOSE) {
+          _closeOperation(GWindow::CLOSE_DISPOSE),
+          _toolbar(nullptr) {
     _init(width, height, visible);
 }
 
@@ -86,7 +105,8 @@ GWindow::GWindow(double x, double y, double width, double height, bool visible)
           _contentPane(nullptr),
           _canvas(nullptr),
           _resizable(true),
-          _closeOperation(GWindow::CLOSE_DISPOSE) {
+          _closeOperation(GWindow::CLOSE_DISPOSE),
+          _toolbar(nullptr) {
     _init(width, height, visible);
     setLocation(x, y);
 }
@@ -120,7 +140,10 @@ GWindow::~GWindow() {
         _lastWindow = nullptr;
     }
     // TODO: delete _iqmainwindow;
-    _iqmainwindow = nullptr;
+    if (_iqmainwindow) {
+        _iqmainwindow->_gwindow = nullptr;
+        _iqmainwindow = nullptr;
+    }
 }
 
 void GWindow::_autograder_setIsAutograderWindow(bool /*isAutograderWindow*/) {
@@ -201,7 +224,6 @@ QAction* GWindow::addMenuItem(const std::string& menu, const std::string& item, 
 }
 
 QAction* GWindow::addMenuItem(const std::string& menu, const std::string& item, const std::string& icon, GEventListenerVoid func) {
-    QAction* action = nullptr;
     std::string menuKey = toLowerCase(stringReplace(menu, "&", ""));
     if (!_menuMap.containsKey(menuKey)) {
         error("GWindow::addMenuItem: menu \"" + menu + "\" does not exist");
@@ -215,6 +237,7 @@ QAction* GWindow::addMenuItem(const std::string& menu, const std::string& item, 
         return _menuActionMap[menuItemKey];
     }
 
+    QAction* action = nullptr;
     GThread::runOnQtGuiThread([this, menu, item, icon, func, menuKey, menuItemKey, &action]() {
         QMenu* qmenu = _menuMap[menuKey];
         action = qmenu->addAction(QString::fromStdString(item));
@@ -222,6 +245,64 @@ QAction* GWindow::addMenuItem(const std::string& menu, const std::string& item, 
             QIcon qicon(QString::fromStdString(icon));
             action->setIcon(qicon);
         }
+
+        // when menu item is clicked, call the function the user gave us
+        _iqmainwindow->connect(action, &QAction::triggered, _iqmainwindow, [func]() {
+            func();
+        });
+        _menuActionMap[menuItemKey] = action;
+    });
+    return action;
+}
+
+QAction* GWindow::addMenuItem(const std::string& menu, const std::string& item, const QIcon& icon, GEventListenerVoid func) {
+    std::string menuKey = toLowerCase(stringReplace(menu, "&", ""));
+    if (!_menuMap.containsKey(menuKey)) {
+        error("GWindow::addMenuItem: menu \"" + menu + "\" does not exist");
+        return nullptr;
+    }
+
+    std::string itemKey = toLowerCase(stringReplace(item, "&", ""));
+    std::string menuItemKey = menuKey + "/" + itemKey;
+    if (_menuActionMap.containsKey(menuItemKey)) {
+        // duplicate; do not create again
+        return _menuActionMap[menuItemKey];
+    }
+
+    QAction* action = nullptr;
+    GThread::runOnQtGuiThread([this, menu, item, &icon, func, menuKey, menuItemKey, &action]() {
+        QMenu* qmenu = _menuMap[menuKey];
+        action = qmenu->addAction(QString::fromStdString(item));
+        action->setIcon(icon);
+
+        // when menu item is clicked, call the function the user gave us
+        _iqmainwindow->connect(action, &QAction::triggered, _iqmainwindow, [func]() {
+            func();
+        });
+        _menuActionMap[menuItemKey] = action;
+    });
+    return action;
+}
+
+QAction* GWindow::addMenuItem(const std::string& menu, const std::string& item, const QPixmap& icon, GEventListenerVoid func) {
+    std::string menuKey = toLowerCase(stringReplace(menu, "&", ""));
+    if (!_menuMap.containsKey(menuKey)) {
+        error("GWindow::addMenuItem: menu \"" + menu + "\" does not exist");
+        return nullptr;
+    }
+
+    std::string itemKey = toLowerCase(stringReplace(item, "&", ""));
+    std::string menuItemKey = menuKey + "/" + itemKey;
+    if (_menuActionMap.containsKey(menuItemKey)) {
+        // duplicate; do not create again
+        return _menuActionMap[menuItemKey];
+    }
+
+    QAction* action = nullptr;
+    GThread::runOnQtGuiThread([this, menu, item, &icon, func, menuKey, menuItemKey, &action]() {
+        QMenu* qmenu = _menuMap[menuKey];
+        action = qmenu->addAction(QString::fromStdString(item));
+        action->setIcon(icon);
 
         // when menu item is clicked, call the function the user gave us
         _iqmainwindow->connect(action, &QAction::triggered, _iqmainwindow, [func]() {
@@ -336,6 +417,133 @@ void GWindow::addToRegion(GInteractor& interactor, const std::string& region) {
     addToRegion(&interactor, region);
 }
 
+void GWindow::addToolbar(const std::string& title) {
+    if (_toolbar) {
+        return;
+    }
+    GThread::runOnQtGuiThread([this, title]() {
+        _toolbar = _iqmainwindow->addToolBar(QString::fromStdString(title));
+        _toolbar->setFloatable(false);
+        _toolbar->setMovable(false);
+        _toolbar->setBaseSize(0, 0);
+    });
+}
+
+QAction* GWindow::addToolbarItem(const std::string& item,
+                                 const std::string& icon) {
+    GEventListenerVoid func = [this, item]() {
+        this->_iqmainwindow->handleMenuAction(/* menu */ "toolbar", item);
+    };
+    return addToolbarItem(item, icon, func);
+}
+
+QAction* GWindow::addToolbarItem(const std::string& item,
+                                 const std::string& icon,
+                                 GEventListenerVoid func) {
+    if (!_toolbar) {
+        addToolbar();
+    }
+
+    std::string itemKey = toLowerCase(stringReplace(item, "&", ""));
+    std::string menuItemKey = "toolbar/" + itemKey;
+    if (_menuActionMap.containsKey(menuItemKey)) {
+        // duplicate; do not create again
+        return _menuActionMap[menuItemKey];
+    }
+
+    QAction* action = nullptr;
+    GThread::runOnQtGuiThread([this, item, icon, func, menuItemKey, &action]() {
+        if (icon.empty()) {
+            action = _toolbar->addAction(QString::fromStdString(item));
+        } else {
+            // toolbar item with icon doesn't show text
+            QIcon qicon(QString::fromStdString(icon));
+            action = _toolbar->addAction(qicon, QString::fromStdString(""));
+            action->setToolTip(QString::fromStdString(item));
+        }
+
+        // when menu item is clicked, call the function the user gave us
+        _iqmainwindow->connect(action, &QAction::triggered, _iqmainwindow, [func]() {
+            func();
+        });
+        _menuActionMap[menuItemKey] = action;
+
+    });
+    return action;
+}
+
+QAction* GWindow::addToolbarItem(const std::string& item,
+                                 const QIcon& icon,
+                                 GEventListenerVoid func) {
+    if (!_toolbar) {
+        addToolbar();
+    }
+
+    std::string itemKey = toLowerCase(stringReplace(item, "&", ""));
+    std::string menuItemKey = "toolbar/" + itemKey;
+    if (_menuActionMap.containsKey(menuItemKey)) {
+        // duplicate; do not create again
+        return _menuActionMap[menuItemKey];
+    }
+
+    QAction* action = nullptr;
+    GThread::runOnQtGuiThread([this, item, &icon, func, menuItemKey, &action]() {
+        // toolbar item with icon doesn't show text
+        action = _toolbar->addAction(icon, QString::fromStdString(""));
+        action->setToolTip(QString::fromStdString(item));
+
+        // when menu item is clicked, call the function the user gave us
+        _iqmainwindow->connect(action, &QAction::triggered, _iqmainwindow, [func]() {
+            func();
+        });
+        _menuActionMap[menuItemKey] = action;
+
+    });
+    return action;
+}
+
+QAction* GWindow::addToolbarItem(const std::string& item,
+                                 const QPixmap& icon,
+                                 GEventListenerVoid func) {
+    if (!_toolbar) {
+        addToolbar();
+    }
+
+    std::string itemKey = toLowerCase(stringReplace(item, "&", ""));
+    std::string menuItemKey = "toolbar/" + itemKey;
+    if (_menuActionMap.containsKey(menuItemKey)) {
+        // duplicate; do not create again
+        return _menuActionMap[menuItemKey];
+    }
+
+    QAction* action = nullptr;
+    GThread::runOnQtGuiThread([this, item, &icon, func, menuItemKey, &action]() {
+        // toolbar item with icon doesn't show text
+        action = _toolbar->addAction(icon, QString::fromStdString(""));
+        action->setToolTip(QString::fromStdString(item));
+
+        // when menu item is clicked, call the function the user gave us
+        _iqmainwindow->connect(action, &QAction::triggered, _iqmainwindow, [func]() {
+            func();
+        });
+        _menuActionMap[menuItemKey] = action;
+
+    });
+    return action;
+}
+
+QAction* GWindow::addToolbarSeparator() {
+    if (!_toolbar) {
+        addToolbar();
+    }
+
+    QAction* action = nullptr;
+    GThread::runOnQtGuiThread([this, &action]() {
+        action = _toolbar->addSeparator();
+    });
+    return action;
+}
+
 void GWindow::clear() {
     // TODO: reimplement to clear out widgets rather than just canvas
     clearCanvas();
@@ -380,11 +588,29 @@ void GWindow::clearRegion(const std::string& region) {
     clearRegion(stringToRegion(region));
 }
 
+void GWindow::clearToolbarItems() {
+    if (!_toolbar) {
+        return;
+    }
+    GThread::runOnQtGuiThread([this]() {
+        _toolbar->clear();
+    });
+}
+
 void GWindow::center() {
     GDimension screenSize = getScreenSize();
     GDimension windowSize = getSize();
     setLocation(screenSize.getWidth()  / 2 - windowSize.getWidth()  / 2,
                 screenSize.getHeight() / 2 - windowSize.getHeight() / 2);
+}
+
+/*static*/ std::string GWindow::chooseLightDarkModeColor(
+        const std::string& lightColor, const std::string& darkColor) {
+    return isDarkMode() ? darkColor : lightColor;
+}
+
+/*static*/ int GWindow::chooseLightDarkModeColorInt(int lightColor, int darkColor) {
+    return isDarkMode() ? darkColor : lightColor;
 }
 
 void GWindow::close() {
@@ -454,6 +680,36 @@ GWindow::CloseOperation GWindow::getCloseOperation() const {
     return _closeOperation;
 }
 
+/*static*/ std::string GWindow::getDefaultInteractorBackgroundColor() {
+    return GColor::convertRGBToColor(getDefaultInteractorBackgroundColorInt());
+}
+
+/*static*/ int GWindow::getDefaultInteractorBackgroundColorInt() {
+    static bool everCheckedBefore = false;
+    static int previousBg = 0;
+    if (!everCheckedBefore) {
+        GTextField* tempTextField = new GTextField();
+        previousBg = tempTextField->getBackgroundInt();
+        everCheckedBefore = true;
+    }
+    return previousBg;
+}
+
+/*static*/ std::string GWindow::getDefaultInteractorTextColor() {
+    return GColor::convertRGBToColor(getDefaultInteractorTextColorInt());
+}
+
+/*static*/ int GWindow::getDefaultInteractorTextColorInt() {
+    static bool everCheckedBefore = false;
+    static int previousFg = 0;
+    if (!everCheckedBefore) {
+        GTextField* tempTextField = new GTextField();
+        previousFg = tempTextField->getForegroundInt();
+        everCheckedBefore = true;
+    }
+    return previousFg;
+}
+
 GObject* GWindow::getGObject(int index) const {
     if (_canvas) {
         return _canvas->getElement(index);
@@ -482,13 +738,12 @@ int GWindow::getGObjectCount() const {
     return _lastWindow;
 }
 
-GPoint GWindow::getLocation() const {
-    QRect geom = _iqmainwindow->geometry();
-    return GPoint(geom.x(), geom.y());
+double GWindow::getHeight() const {
+    return _iqmainwindow->height();
 }
 
-double GWindow::getHeight() const {
-    return _iqmainwindow->geometry().height();
+GPoint GWindow::getLocation() const {
+    return GPoint(_iqmainwindow->x(), _iqmainwindow->y());
 }
 
 GDimension GWindow::getPreferredSize() const {
@@ -545,8 +800,7 @@ double GWindow::getRegionWidth(const std::string& region) const {
 }
 
 GDimension GWindow::getSize() const {
-    QRect geom = _iqmainwindow->geometry();
-    return GDimension(geom.width(), geom.height());
+    return GDimension(_iqmainwindow->width(), _iqmainwindow->height());
 }
 
 std::string GWindow::getTitle() const {
@@ -562,15 +816,19 @@ QWidget* GWindow::getWidget() const {
 }
 
 double GWindow::getWidth() const {
-    return _iqmainwindow->geometry().width();
+    return _iqmainwindow->width();
 }
 
 double GWindow::getX() const {
-    return _iqmainwindow->geometry().x();
+    return _iqmainwindow->x();
 }
 
 double GWindow::getY() const {
-    return _iqmainwindow->geometry().y();
+    return _iqmainwindow->y();
+}
+
+bool GWindow::hasToolbar() const {
+    return _toolbar != nullptr;
 }
 
 void GWindow::hide() {
@@ -583,6 +841,21 @@ bool GWindow::inBounds(double x, double y) const {
 
 bool GWindow::inCanvasBounds(double x, double y) const {
     return 0 <= x && x < getCanvasWidth() && 0 <= y && y < getCanvasHeight();
+}
+
+/*static*/ bool GWindow::isDarkMode() {
+    if (!getLastWindow()) {
+        // cannot check yet
+        return false;
+    }
+    int bg = getDefaultInteractorBackgroundColorInt();
+    int fg = getDefaultInteractorTextColorInt();
+
+    // our heuristic: if the text is brighter than the background,
+    // we'll assume they are in dark mode
+    double bgLum = GColor::getLuminance(bg);
+    double fgLum = GColor::getLuminance(fg);
+    return fgLum > bgLum;
 }
 
 /*static*/ bool GWindow::isHighDensityScreen() {
@@ -645,7 +918,7 @@ void GWindow::pack() {
 
 void GWindow::pause(double ms) {
     require::nonNegative(ms, "GWindow::pause", "milliseconds");
-    GThread::sleep(ms);
+    GThread::getCurrentThread()->sleep(ms);
 }
 
 void GWindow::processKeyPressEventInternal(QKeyEvent* /* event */) {
@@ -731,6 +1004,16 @@ void GWindow::removeTimerListener() {
     removeEventListener("timer");
 }
 
+void GWindow::removeToolbar() {
+    if (!_toolbar) {
+        return;
+    }
+    GThread::runOnQtGuiThread([this]() {
+        _iqmainwindow->removeToolBar(_toolbar);
+        _toolbar = nullptr;
+    });
+}
+
 void GWindow::removeWindowListener() {
     removeEventListeners({"close",
                          "closing",
@@ -744,6 +1027,7 @@ void GWindow::removeWindowListener() {
 void GWindow::requestFocus() {
     GThread::runOnQtGuiThread([this]() {
         _iqmainwindow->setFocus();
+        _iqmainwindow->activateWindow();
     });
 }
 
@@ -816,10 +1100,7 @@ void GWindow::setHeight(double height) {
 
 void GWindow::setLocation(double x, double y) {
     GThread::runOnQtGuiThread([this, x, y]() {
-        _iqmainwindow->setGeometry(static_cast<int>(x),
-                                   static_cast<int>(y),
-                                   static_cast<int>(getWidth()),
-                                   static_cast<int>(getHeight()));
+        _iqmainwindow->move(static_cast<int>(x), static_cast<int>(y));
     });
 }
 
@@ -1033,7 +1314,7 @@ void GWindow::show() {
 
 void GWindow::sleep(double ms) {
     require::nonNegative(ms, "GWindow::sleep", "delay (ms)");
-    GThread::sleep(ms);
+    GThread::getCurrentThread()->sleep(ms);
 }
 
 GWindow::Region GWindow::stringToRegion(const std::string& regionStr) {
@@ -1091,9 +1372,11 @@ double getScreenWidth() {
     return GWindow::getScreenWidth();
 }
 
+#ifndef SPL_HEADLESS_MODE
 void pause(double milliseconds) {
-    GThread::sleep(milliseconds);
+    GThread::getCurrentThread()->sleep(milliseconds);
 }
+#endif // SPL_HEADLESS_MODE
 
 void repaint() {
     QMainWindow* lastWindow = GWindow::getLastWindow();
@@ -1115,7 +1398,7 @@ _Internal_QMainWindow::_Internal_QMainWindow(GWindow* gwindow, QWidget* parent)
 void _Internal_QMainWindow::changeEvent(QEvent* event) {
     require::nonNull(event, "_Internal_QMainWindow::changeEvent", "event");
     QMainWindow::changeEvent(event);   // call super
-    if (event->type() != QEvent::WindowStateChange) {
+    if (!_gwindow || event->type() != QEvent::WindowStateChange) {
         return;
     }
 
@@ -1137,6 +1420,11 @@ void _Internal_QMainWindow::changeEvent(QEvent* event) {
 
 void _Internal_QMainWindow::closeEvent(QCloseEvent* event) {
     require::nonNull(event, "_Internal_QMainWindow::closeEvent", "event");
+    if (!_gwindow) {
+        QMainWindow::closeEvent(event);   // call super
+        return;
+    }
+
     // send "closing" event before window closes
     _gwindow->fireGEvent(event, WINDOW_CLOSING, "closing");
 
@@ -1170,18 +1458,27 @@ void _Internal_QMainWindow::handleMenuAction(const std::string& menu, const std:
 void _Internal_QMainWindow::keyPressEvent(QKeyEvent* event) {
     require::nonNull(event, "_Internal_QMainWindow::keyPressEvent", "event");
     QMainWindow::keyPressEvent(event);   // call super
+    if (!_gwindow) {
+        return;
+    }
     _gwindow->processKeyPressEventInternal(event);
 }
 
 void _Internal_QMainWindow::resizeEvent(QResizeEvent* event) {
     require::nonNull(event, "_Internal_QMainWindow::resizeEvent", "event");
     QMainWindow::resizeEvent(event);   // call super
+    if (!_gwindow) {
+        return;
+    }
     _gwindow->fireGEvent(event, WINDOW_RESIZED, "resize");
 }
 
 void _Internal_QMainWindow::timerEvent(QTimerEvent* event) {
     require::nonNull(event, "_Internal_QMainWindow::timerEvent", "event");
     QMainWindow::timerEvent(event);   // call super
+    if (!_gwindow) {
+        return;
+    }
     _gwindow->fireGEvent(event, TIMER_TICKED, "timer");
 }
 

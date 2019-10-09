@@ -43,7 +43,8 @@ UnitTestDetails::UnitTestDetails()
       expected(""),
       student(""),
       passed(false),
-      overwrite(true) {
+      overwrite(false),
+      result(TEST_RESULT_UNKNOWN) {
     // empty
 }
 
@@ -57,7 +58,8 @@ UnitTestDetails::UnitTestDetails(
       student(""),
       diffFlags(0),
       passed(pass),
-      overwrite(true) {
+      overwrite(false),
+      result(pass ? TEST_RESULT_PASS : TEST_RESULT_FAIL) {
     // empty
 }
 
@@ -74,7 +76,8 @@ UnitTestDetails::UnitTestDetails(autograder::UnitTestType tp,
       valueType(vtype),
       diffFlags(0),
       passed(pass),
-      overwrite(true) {
+      overwrite(false),
+      result(pass ? TEST_RESULT_PASS : TEST_RESULT_FAIL) {
     // empty
 }
 
@@ -92,7 +95,8 @@ UnitTestDetails::UnitTestDetails(autograder::UnitTestType tp,
       valueType(vtype),
       diffFlags(theDiffFlags),
       passed(pass),
-      overwrite(true) {
+      overwrite(false),
+      result(pass ? TEST_RESULT_PASS : TEST_RESULT_FAIL) {
     // empty
 }
 
@@ -107,7 +111,8 @@ UnitTestDetails::UnitTestDetails(autograder::UnitTestType tp,
       valueType("bool"),
       diffFlags(0),
       passed(pass),
-      overwrite(true) {
+      overwrite(false),
+      result(pass ? TEST_RESULT_PASS : TEST_RESULT_FAIL) {
     expected = boolToString(exp);
     student = boolToString(stu);
 }
@@ -123,7 +128,8 @@ UnitTestDetails::UnitTestDetails(autograder::UnitTestType tp,
       valueType("char"),
       diffFlags(0),
       passed(pass),
-      overwrite(true) {
+      overwrite(false),
+      result(pass ? TEST_RESULT_PASS : TEST_RESULT_FAIL) {
     expected = charToString(exp);
     student = charToString(stu);
 }
@@ -139,7 +145,8 @@ UnitTestDetails::UnitTestDetails(autograder::UnitTestType tp,
       valueType("double"),
       diffFlags(0),
       passed(pass),
-      overwrite(true) {
+      overwrite(false),
+      result(pass ? TEST_RESULT_PASS : TEST_RESULT_FAIL) {
     expected = realToString(exp);
     student = realToString(stu);
 }
@@ -155,9 +162,10 @@ UnitTestDetails::UnitTestDetails(autograder::UnitTestType tp,
       valueType("int"),
       diffFlags(0),
       passed(pass),
-      overwrite(true) {
-    expected = integerToString(exp);
-    student = integerToString(stu);
+      overwrite(false),
+      result(pass ? TEST_RESULT_PASS : TEST_RESULT_FAIL) {
+    expected = std::to_string(exp);
+    student = std::to_string(stu);
 }
 
 UnitTestDetails::UnitTestDetails(autograder::UnitTestType tp,
@@ -173,9 +181,27 @@ UnitTestDetails::UnitTestDetails(autograder::UnitTestType tp,
       valueType("string"),
       diffFlags(0),
       passed(pass),
-      overwrite(true) {
+      overwrite(false),
+      result(pass ? TEST_RESULT_PASS : TEST_RESULT_FAIL) {
     // empty
 }
+UnitTestDetails::UnitTestDetails(autograder::UnitTestType tp,
+                                 const std::string& msg,
+                                 void* exp,
+                                 void* stu,
+                                 const std::string& /*vtype*/,
+                                 bool pass)
+    : testType(tp),
+      message(msg),
+      valueType("pointer"),
+      diffFlags(0),
+      passed(pass),
+      overwrite(false),
+      result(pass ? TEST_RESULT_PASS : TEST_RESULT_FAIL) {
+    expected = std::to_string(exp);
+    student = std::to_string(stu);
+}
+
 
 std::string UnitTestDetails::toString() const {
     std::ostringstream out;

@@ -4,6 +4,8 @@
  * This file implements the OS class declared in os.h.
  * 
  * @author Marty Stepp
+ * @version 2018/11/22
+ * - added headless (non-Qt) mode support
  * @version 2018/09/23
  * - bug fix for isMac
  * @version 2018/09/17
@@ -12,13 +14,15 @@
 
 #define INTERNAL_INCLUDE 1
 #include "os.h"
+#ifndef SPL_HEADLESS_MODE
 #include <QString>
 #include <QSysInfo>
+#endif // SPL_HEADLESS_MODE
 #define INTERNAL_INCLUDE 1
 #include "strlib.h"
 #undef INTERNAL_INCLUDE
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 9, 0)
+#if !defined(SPL_HEADLESS_MODE) && QT_VERSION >= QT_VERSION_CHECK(5, 9, 0)
 /*static*/ std::string OS::getName() {
     std::string productName = QSysInfo::prettyProductName().toStdString();
     return productName;
